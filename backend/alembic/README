@@ -1,0 +1,1 @@
+Alembic migrations for the Clai backend. Revisions are generated from SQLAlchemy metadata in app.models.
