@@ -1,11 +1,24 @@
-import { BackendStatus } from "./backend-status";
+import { NewProjectButton } from "@/components/projects/new-project-button";
+import { ProjectGrid } from "@/components/projects/project-grid";
+import { getProjects } from "@/lib/projects";
 
-export default function Home() {
+export default async function Home() {
+  const projects = await getProjects();
+
   return (
-    <main className="mx-auto flex min-h-full w-full max-w-xl flex-col justify-center gap-4 px-6 py-16">
-      <h1 className="text-2xl font-semibold tracking-tight">Clai</h1>
-      <p>Frontend is running.</p>
-      <BackendStatus />
-    </main>
+    <>
+      <header className="border-b border-border">
+        <div className="mx-auto flex h-14 w-full max-w-[1440px] items-center justify-between px-5 sm:px-7">
+          <span className="text-base font-semibold tracking-[-0.01em]">Clai</span>
+          <NewProjectButton />
+        </div>
+      </header>
+      <main className="mx-auto w-full max-w-[1440px] flex-1 px-5 py-7 sm:px-7">
+        <h1 className="mb-6 text-xl font-semibold tracking-[-0.01em]">
+          Projects
+        </h1>
+        <ProjectGrid projects={projects} />
+      </main>
+    </>
   );
 }

@@ -3,8 +3,15 @@
 Clai is a graph-based workspace for AI-assisted 3D product design.
 
 This repository contains the application foundation: a Next.js frontend, FastAPI
-backend, PostgreSQL, Redis, and a Celery worker. Product features are not
+backend, PostgreSQL, Redis, and a Celery worker. The graph workspace is not
 implemented yet.
+
+## Stack
+
+- Next.js, TypeScript, and Tailwind CSS
+- FastAPI, SQLAlchemy, and Alembic
+- PostgreSQL, Redis, and Celery
+- Docker Compose, npm, and uv
 
 ## Setup
 

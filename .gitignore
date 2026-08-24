@@ -1,6 +1,8 @@
 .DS_Store
 .env
 *.log
+.progress/
+.progress/*
 
 # Python
 __pycache__/
