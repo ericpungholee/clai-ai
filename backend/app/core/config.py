@@ -15,13 +15,6 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
-    s3_endpoint_url: str | None = None
-    s3_access_key_id: str | None = None
-    s3_secret_access_key: str | None = None
-    s3_bucket: str | None = None
-
-    tripo_api_key: str | None = None
-
     @property
     def cors_origin_list(self) -> list[str]:
         return [
