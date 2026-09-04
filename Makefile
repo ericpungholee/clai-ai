@@ -1,4 +1,4 @@
-.PHONY: dev down logs migrate revision backend-shell db-shell test lint
+.PHONY: dev down logs migrate revision backend-shell db-shell test test-postgres lint
 
 dev:
 	docker compose up --build
@@ -24,6 +24,10 @@ db-shell:
 test:
 	docker compose exec backend uv run pytest
 	docker compose exec frontend npm run lint
+	docker compose exec frontend npm run typecheck
+
+test-postgres:
+	docker compose --profile test run --rm backend-test
 
 lint:
 	docker compose exec backend uv run ruff check app tests alembic

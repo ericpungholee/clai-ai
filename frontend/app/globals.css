@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
 
 :root {
   --background: #ffffff;
@@ -39,4 +40,47 @@ a {
 ::selection {
   background: #bae6fd;
   color: var(--foreground);
+}
+
+.react-flow {
+  --xy-background-color: #fafafa;
+  --xy-edge-stroke-selected-default: #0284c7;
+  --xy-connectionline-stroke-default: #0284c7;
+  --xy-selection-background-color-default: rgb(186 230 253 / 25%);
+  --xy-selection-border-default: 1px solid #38bdf8;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--accent);
+}
+
+.react-flow__controls {
+  overflow: hidden;
+  border: 1px solid #d4d4d8;
+  border-radius: var(--radius-control);
+  box-shadow: none;
+}
+
+.react-flow__controls-button {
+  width: 30px;
+  height: 30px;
+  border-bottom-color: #e4e4e7;
+  background: #ffffff;
+  color: #3f3f46;
+}
+
+.react-flow__controls-button:hover {
+  background: #f4f4f5;
+}
+
+.react-flow__controls-button svg {
+  max-width: 13px;
+  max-height: 13px;
+  fill: currentColor;
+}
+
+.react-flow__attribution {
+  color: #a1a1aa;
+  background: transparent;
+  font-size: 9px;
 }

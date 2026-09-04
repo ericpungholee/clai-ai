@@ -7,7 +7,8 @@ from app.core.config import settings
 from app.models import Base
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+connection_url = config.attributes.get("connection_url", settings.database_url)
+config.set_main_option("sqlalchemy.url", connection_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

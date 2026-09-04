@@ -2,7 +2,7 @@
 .env
 *.log
 .progress/
-.progress/*
+.data/
 
 # Python
 __pycache__/
