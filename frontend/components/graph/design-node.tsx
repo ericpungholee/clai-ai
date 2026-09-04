@@ -15,7 +15,11 @@ export const DesignNode = memo(function DesignNode({
   const activeVersion =
     data.versions.find((version) => version.id === data.activeVersionId) ??
     data.versions.at(-1);
-  const canRun = data.prompt.trim().length > 0 && data.runState !== "running";
+  const staleMask =
+    data.mask !== null &&
+    data.mask.subject_version_id !== data.subject?.versionId;
+  const canRun =
+    data.prompt.trim().length > 0 && data.runState !== "running" && !staleMask;
 
   return (
     <NodeFrame
@@ -59,6 +63,21 @@ export const DesignNode = memo(function DesignNode({
             </p>
           </div>
         </div>
+      ) : null}
+
+      {data.subject ? (
+        <button
+          className="nodrag mt-2 w-full rounded-md border border-orange-200 bg-orange-50 py-1.5 text-xs text-orange-900"
+          onClick={() => actions.editMask(id)}
+        >
+          {data.mask ? "Edit mask" : "Select an area to edit"}
+        </button>
+      ) : null}
+      {staleMask ? (
+        <p role="alert" className="mt-2 text-xs text-red-700">
+          This mask belongs to a different subject version. Reopen the mask
+          editor before running.
+        </p>
       ) : null}
 
       <textarea
@@ -128,7 +147,9 @@ export const DesignNode = memo(function DesignNode({
             />
             White background
           </label>
-        ) : <span />}
+        ) : (
+          <span />
+        )}
         <button
           className="nodrag rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-300"
           disabled={!canRun}

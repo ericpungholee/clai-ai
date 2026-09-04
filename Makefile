@@ -25,6 +25,7 @@ test:
 	docker compose exec backend uv run pytest
 	docker compose exec frontend npm run lint
 	docker compose exec frontend npm run typecheck
+	docker compose exec frontend npm test
 
 test-postgres:
 	docker compose --profile test run --rm backend-test

@@ -61,12 +61,18 @@ def execute_run_job(
             metadata=result.response_metadata,
             session_factory=session_factory,
         )
-        artifact = ingestor.ingest(result)
-        metric = (
-            scorer.score(request=request, artifact=artifact)
-            if request.subject is not None
-            else ChangeMagnitudeResult(method="dinov2_cosine", status="pending")
-        )
+        if request.mask is not None:
+            artifact, drift = ingestor.ingest_masked(result, request)
+            metric = ChangeMagnitudeResult(
+                method="outside_feather_pixel_diff", status="complete", value=drift
+            )
+        else:
+            artifact = ingestor.ingest(result)
+            metric = (
+                scorer.score(request=request, artifact=artifact)
+                if request.subject is not None
+                else ChangeMagnitudeResult(method="dinov2_cosine", status="pending")
+            )
         return _commit_version(
             job_id=job_id,
             request=request,

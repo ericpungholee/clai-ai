@@ -35,6 +35,7 @@ import {
 
 import { AddNodeControl } from "./add-node-control";
 import { DesignNode } from "./design-node";
+import { MaskEditor } from "./mask-editor";
 import { DesignNodeActionsContext } from "./design-node-actions";
 import { SaveStatus, type SaveState } from "./save-status";
 
@@ -95,6 +96,7 @@ export function GraphWorkspace({
   const [nodes, setNodes] = useState(initialWorkspace.nodes);
   const [edges, setEdges] = useState(initialWorkspace.edges);
   const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [maskNodeId, setMaskNodeId] = useState<string | null>(null);
   const flowInstanceRef =
     useRef<ReactFlowInstance<WorkspaceNode, WorkspaceEdge>>(null);
   const canvasRef = useRef<HTMLElement>(null);
@@ -184,7 +186,10 @@ export function GraphWorkspace({
             return { ...node, data: { ...node.data, title } };
           }
           const currentSubject = node.data.subject;
-          if (currentSubject !== null && currentSubject.nodeTitle === previous) {
+          if (
+            currentSubject !== null &&
+            currentSubject.nodeTitle === previous
+          ) {
             return {
               ...node,
               data: {
@@ -209,7 +214,9 @@ export function GraphWorkspace({
 
   const updateWhiteBackground = useCallback(
     (nodeId: string, enabled: boolean) => {
-      const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+      const node = nodesRef.current.find(
+        (candidate) => candidate.id === nodeId,
+      );
       if (!node) return;
       const settings = { ...node.data.settings, whiteBackground: enabled };
       updateNodeData(nodeId, { settings });
@@ -271,7 +278,10 @@ export function GraphWorkspace({
       const source = nodesRef.current.find(
         (node) => node.id === connection.source,
       );
-      if (!source?.data.activeVersionId || connection.source === connection.target) {
+      if (
+        !source?.data.activeVersionId ||
+        connection.source === connection.target
+      ) {
         setSaveState("failed");
         return;
       }
@@ -344,7 +354,9 @@ export function GraphWorkspace({
 
   const runNode = useCallback(
     async (nodeId: string) => {
-      const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+      const node = nodesRef.current.find(
+        (candidate) => candidate.id === nodeId,
+      );
       if (!node || !node.data.prompt.trim()) return;
       const timer = patchTimersRef.current.get(nodeId);
       if (timer !== undefined) {
@@ -387,6 +399,7 @@ export function GraphWorkspace({
       selectVersion,
       branchVersion,
       runNode,
+      editMask: setMaskNodeId,
     }),
     [
       branchVersion,
@@ -401,6 +414,23 @@ export function GraphWorkspace({
   return (
     <DesignNodeActionsContext.Provider value={actions}>
       <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-white">
+        {(() => {
+          const node = nodes.find((candidate) => candidate.id === maskNodeId);
+          return node?.data.subject ? (
+            <MaskEditor
+              key={`${node.id}:${node.data.subject.versionId}`}
+              projectId={projectId}
+              nodeId={node.id}
+              subject={node.data.subject}
+              initialMask={node.data.mask}
+              onClose={() => setMaskNodeId(null)}
+              onSave={(mask) => {
+                updateNodeData(node.id, { mask });
+                setMaskNodeId(null);
+              }}
+            />
+          ) : null;
+        })()}
         <header className="grid h-14 shrink-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center border-b border-border px-4 sm:px-6">
           <Link
             className="w-fit text-sm font-medium text-neutral-600 hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"

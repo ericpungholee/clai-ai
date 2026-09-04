@@ -9,6 +9,7 @@ type DesignNodeActions = {
   selectVersion: (nodeId: string, versionId: string) => void;
   branchVersion: (nodeId: string, versionId: string) => void;
   runNode: (nodeId: string) => void;
+  editMask: (nodeId: string) => void;
 };
 
 export const DesignNodeActionsContext = createContext<DesignNodeActions | null>(

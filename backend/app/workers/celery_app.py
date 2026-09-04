@@ -4,7 +4,7 @@ from celery import Celery
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.providers.factory import create_nano_banana_provider
+from app.providers.factory import FalImageProvider
 from app.services.drift import create_change_magnitude_scorer
 from app.services.run_execution import execute_run_job
 from app.storage.factory import create_artifact_reader, create_provider_output_ingestor
@@ -36,7 +36,7 @@ def run_job(job_id: str) -> str:
     version_id = execute_run_job(
         job_id=uuid.UUID(job_id),
         session_factory=SessionLocal,
-        provider=create_nano_banana_provider(
+        provider=FalImageProvider(
             settings=settings,
             artifact_reader=artifact_reader,
         ),
