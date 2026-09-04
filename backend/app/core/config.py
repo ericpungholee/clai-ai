@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     fal_key: SecretStr | None = None
     fal_timeout_seconds: float = 120.0
+    fal_output_hosts: str = "v3.fal.media,v3b.fal.media"
+    drift_scorer_command: str | None = None
+    drift_scorer_timeout_seconds: float = 120.0
 
     artifact_storage_backend: Literal["filesystem", "s3"] = "filesystem"
     artifact_storage_path: Path = Path(".data/artifacts")
@@ -38,6 +41,12 @@ class Settings(BaseSettings):
     @property
     def fal_api_key(self) -> str | None:
         return self.fal_key.get_secret_value() if self.fal_key else None
+
+    @property
+    def fal_output_host_list(self) -> list[str]:
+        return [
+            host.strip() for host in self.fal_output_hosts.split(",") if host.strip()
+        ]
 
 
 @lru_cache

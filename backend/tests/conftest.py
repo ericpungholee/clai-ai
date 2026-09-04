@@ -39,11 +39,19 @@ def override_get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+def reset_sqlite_schema() -> None:
+    with engine.connect() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        Base.metadata.drop_all(bind=connection)
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+
+
 @pytest.fixture
 def client() -> Generator[TestClient, None, None]:
+    reset_sqlite_schema()
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
-    Base.metadata.drop_all(bind=engine)
+    reset_sqlite_schema()

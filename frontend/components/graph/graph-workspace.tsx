@@ -6,7 +6,6 @@ import {
   Controls,
   Panel,
   ReactFlow,
-  addEdge,
   applyEdgeChanges,
   applyNodeChanges,
   type Connection,
@@ -19,70 +18,62 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  saveGraph,
-  toGraphDocument,
-  toWorkspaceEdges,
-  toWorkspaceNodes,
+  createBranch,
+  createDesignNode,
+  deleteBaseEdge,
+  deleteDesignNode,
+  getGraph,
+  getRun,
+  patchDesignNode,
+  replaceBaseEdge,
+  submitRun,
+  toWorkspaceGraph,
   type GraphDocument,
-  type GraphNodeType,
   type WorkspaceEdge,
   type WorkspaceNode,
 } from "@/lib/graph";
 
 import { AddNodeControl } from "./add-node-control";
-import { ImageNode } from "./image-node";
-import { ModelNode } from "./model-node";
-import { PromptNode } from "./prompt-node";
-import { PromptNodeActionsContext } from "./prompt-node-actions";
+import { DesignNode } from "./design-node";
+import { DesignNodeActionsContext } from "./design-node-actions";
 import { SaveStatus, type SaveState } from "./save-status";
 
-const nodeTypes = {
-  prompt: PromptNode,
-  image: ImageNode,
-  model3d: ModelNode,
-} satisfies NodeTypes;
-
+const nodeTypes = { design: DesignNode } satisfies NodeTypes;
 const fitViewOptions = { padding: 0.2, maxZoom: 1 };
 const defaultEdgeOptions = {
-  style: { stroke: "#a1a1aa", strokeWidth: 1.5 },
+  style: { stroke: "#0284c7", strokeWidth: 1.75 },
 };
 
 function findAvailablePosition(
   center: { x: number; y: number },
   nodes: WorkspaceNode[],
 ): { x: number; y: number } {
-  const origin = { x: center.x - 120, y: center.y - 70 };
-  const offsets = [{ column: 0, row: 0 }];
-
-  for (let radius = 1; radius < 10; radius += 1) {
-    offsets.push(
-      { column: radius, row: 0 },
-      { column: -radius, row: 0 },
-      { column: 0, row: radius },
-      { column: 0, row: -radius },
-      { column: radius, row: radius },
-      { column: -radius, row: radius },
-      { column: radius, row: -radius },
-      { column: -radius, row: -radius },
-    );
-  }
-
-  for (const offset of offsets) {
-    const candidate = {
-      x: origin.x + offset.column * 280,
-      y: origin.y + offset.row * 190,
-    };
-    const overlapsNode = nodes.some(
-      (node) =>
-        Math.abs(node.position.x - candidate.x) < 250 &&
-        Math.abs(node.position.y - candidate.y) < 160,
-    );
-
-    if (!overlapsNode) {
-      return candidate;
+  const origin = { x: center.x - 152, y: center.y - 160 };
+  for (let radius = 0; radius < 10; radius += 1) {
+    const offsets =
+      radius === 0
+        ? [{ column: 0, row: 0 }]
+        : [
+            { column: radius, row: 0 },
+            { column: -radius, row: 0 },
+            { column: 0, row: radius },
+            { column: 0, row: -radius },
+            { column: radius, row: radius },
+            { column: -radius, row: radius },
+          ];
+    for (const offset of offsets) {
+      const candidate = {
+        x: origin.x + offset.column * 350,
+        y: origin.y + offset.row * 430,
+      };
+      const overlaps = nodes.some(
+        (node) =>
+          Math.abs(node.position.x - candidate.x) < 320 &&
+          Math.abs(node.position.y - candidate.y) < 390,
+      );
+      if (!overlaps) return candidate;
     }
   }
-
   return origin;
 }
 
@@ -97,183 +88,298 @@ export function GraphWorkspace({
   projectId,
   projectName,
 }: GraphWorkspaceProps) {
-  const initialNodes = useMemo(
-    () => toWorkspaceNodes(initialGraph.nodes),
-    [initialGraph.nodes],
+  const initialWorkspace = useMemo(
+    () => toWorkspaceGraph(initialGraph),
+    [initialGraph],
   );
-  const initialEdges = useMemo(
-    () => toWorkspaceEdges(initialGraph.edges),
-    [initialGraph.edges],
-  );
-  const [nodes, setNodes] = useState<WorkspaceNode[]>(initialNodes);
-  const [edges, setEdges] = useState<WorkspaceEdge[]>(initialEdges);
-  const [saveRevision, setSaveRevision] = useState(0);
+  const [nodes, setNodes] = useState(initialWorkspace.nodes);
+  const [edges, setEdges] = useState(initialWorkspace.edges);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const flowInstanceRef =
     useRef<ReactFlowInstance<WorkspaceNode, WorkspaceEdge>>(null);
   const canvasRef = useRef<HTMLElement>(null);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
-  const saveRevisionRef = useRef(0);
-  const saveInFlightRef = useRef(false);
-  const saveQueuedRef = useRef(false);
+  const patchTimersRef = useRef(new Map<string, number>());
   const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;
-
+    const timers = patchTimersRef.current;
     return () => {
       mountedRef.current = false;
+      for (const timer of timers.values()) window.clearTimeout(timer);
     };
   }, []);
 
-  const markDirty = useCallback(() => {
-    saveRevisionRef.current += 1;
-    setSaveRevision(saveRevisionRef.current);
-    setSaveState("saving");
+  const replaceWorkspace = useCallback((graph: GraphDocument) => {
+    const workspace = toWorkspaceGraph(graph);
+    nodesRef.current = workspace.nodes;
+    edgesRef.current = workspace.edges;
+    setNodes(workspace.nodes);
+    setEdges(workspace.edges);
   }, []);
 
-  const persistLatestGraph = useCallback(async () => {
-    if (saveInFlightRef.current) {
-      saveQueuedRef.current = true;
-      return;
-    }
+  const refreshWorkspace = useCallback(async () => {
+    const graph = await getGraph(projectId);
+    if (mountedRef.current) replaceWorkspace(graph);
+  }, [projectId, replaceWorkspace]);
 
-    saveInFlightRef.current = true;
-
-    while (true) {
-      const revision = saveRevisionRef.current;
-      const graph = toGraphDocument(nodesRef.current, edgesRef.current);
-      saveQueuedRef.current = false;
-
+  const persistNodePatch = useCallback(
+    async (nodeId: string, patch: Record<string, unknown>) => {
+      setSaveState("saving");
       try {
-        await saveGraph(projectId, graph);
-
-        if (mountedRef.current && saveRevisionRef.current === revision) {
-          setSaveState("saved");
-        }
+        await patchDesignNode(projectId, nodeId, patch);
+        if (mountedRef.current) setSaveState("saved");
       } catch {
-        if (mountedRef.current && saveRevisionRef.current === revision) {
-          setSaveState("failed");
-        }
+        if (mountedRef.current) setSaveState("failed");
       }
+    },
+    [projectId],
+  );
 
-      if (!saveQueuedRef.current && saveRevisionRef.current === revision) {
-        break;
-      }
-    }
+  const scheduleNodePatch = useCallback(
+    (nodeId: string, patch: Record<string, unknown>) => {
+      const currentTimer = patchTimersRef.current.get(nodeId);
+      if (currentTimer !== undefined) window.clearTimeout(currentTimer);
+      setSaveState("saving");
+      const timer = window.setTimeout(() => {
+        patchTimersRef.current.delete(nodeId);
+        void persistNodePatch(nodeId, patch);
+      }, 500);
+      patchTimersRef.current.set(nodeId, timer);
+    },
+    [persistNodePatch],
+  );
 
-    saveInFlightRef.current = false;
-  }, [projectId]);
+  const updateNodeData = useCallback(
+    (nodeId: string, patch: Partial<WorkspaceNode["data"]>) => {
+      setNodes((current) => {
+        const next = current.map((node) =>
+          node.id === nodeId
+            ? { ...node, data: { ...node.data, ...patch } }
+            : node,
+        );
+        nodesRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
 
-  useEffect(() => {
-    if (saveRevision === 0) {
-      return;
-    }
+  const updatePrompt = useCallback(
+    (nodeId: string, prompt: string) => {
+      updateNodeData(nodeId, { prompt });
+      scheduleNodePatch(nodeId, { prompt });
+    },
+    [scheduleNodePatch, updateNodeData],
+  );
 
-    const saveTimer = window.setTimeout(() => {
-      void persistLatestGraph();
-    }, 700);
-
-    return () => window.clearTimeout(saveTimer);
-  }, [persistLatestGraph, saveRevision]);
+  const updateTitle = useCallback(
+    (nodeId: string, title: string) => {
+      setNodes((current) => {
+        const previous = current.find((node) => node.id === nodeId)?.data.title;
+        const next = current.map((node) => {
+          if (node.id === nodeId) {
+            return { ...node, data: { ...node.data, title } };
+          }
+          const currentBase = node.data.base;
+          if (currentBase !== null && currentBase.nodeTitle === previous) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                base: {
+                  nodeTitle: title,
+                  versionId: currentBase.versionId,
+                  artifactUrl: currentBase.artifactUrl,
+                },
+              },
+            };
+          }
+          return node;
+        });
+        nodesRef.current = next;
+        return next;
+      });
+      scheduleNodePatch(nodeId, { title });
+    },
+    [scheduleNodePatch],
+  );
 
   const onNodesChange = useCallback(
     (changes: NodeChange<WorkspaceNode>[]) => {
-      setNodes((currentNodes) => {
-        const nextNodes = applyNodeChanges(changes, currentNodes);
-        nodesRef.current = nextNodes;
-        return nextNodes;
+      const removedIds = changes
+        .filter((change) => change.type === "remove")
+        .map((change) => change.id);
+      const settledPositions = changes.filter(
+        (change) => change.type === "position" && change.dragging === false,
+      );
+      setNodes((current) => {
+        const next = applyNodeChanges(changes, current);
+        nodesRef.current = next;
+        return next;
       });
-
-      if (
-        changes.some(
-          (change) =>
-            change.type === "remove" ||
-            (change.type === "position" && change.dragging === false),
-        )
-      ) {
-        markDirty();
+      for (const change of settledPositions) {
+        if (change.type === "position" && change.position) {
+          void persistNodePatch(change.id, { position: change.position });
+        }
+      }
+      for (const nodeId of removedIds) {
+        void deleteDesignNode(projectId, nodeId).catch(() =>
+          setSaveState("failed"),
+        );
       }
     },
-    [markDirty],
+    [persistNodePatch, projectId],
   );
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange<WorkspaceEdge>[]) => {
-      setEdges((currentEdges) => {
-        const nextEdges = applyEdgeChanges(changes, currentEdges);
-        edgesRef.current = nextEdges;
-        return nextEdges;
+      const removed = changes
+        .filter((change) => change.type === "remove")
+        .map((change) => edgesRef.current.find((edge) => edge.id === change.id))
+        .filter((edge): edge is WorkspaceEdge => edge !== undefined);
+      setEdges((current) => {
+        const next = applyEdgeChanges(changes, current);
+        edgesRef.current = next;
+        return next;
       });
-
-      if (changes.some((change) => change.type === "remove")) {
-        markDirty();
+      for (const edge of removed) {
+        void deleteBaseEdge(projectId, edge.target).catch(() =>
+          setSaveState("failed"),
+        );
       }
     },
-    [markDirty],
+    [projectId],
   );
 
   const onConnect = useCallback(
-    (connection: Connection) => {
-      setEdges((currentEdges) => {
-        const nextEdges = addEdge(
-          { ...connection, id: crypto.randomUUID() },
-          currentEdges,
-        );
-        edgesRef.current = nextEdges;
-        return nextEdges;
-      });
-      markDirty();
+    async (connection: Connection) => {
+      if (!connection.source || !connection.target) return;
+      const source = nodesRef.current.find(
+        (node) => node.id === connection.source,
+      );
+      if (!source?.data.activeVersionId || connection.source === connection.target) {
+        setSaveState("failed");
+        return;
+      }
+      setSaveState("saving");
+      try {
+        await replaceBaseEdge(projectId, connection.target, {
+          source_node_id: connection.source,
+          version_id: source.data.activeVersionId,
+        });
+        await refreshWorkspace();
+        if (mountedRef.current) setSaveState("saved");
+      } catch {
+        if (mountedRef.current) setSaveState("failed");
+      }
     },
-    [markDirty],
+    [projectId, refreshWorkspace],
   );
 
-  const updatePromptText = useCallback(
-    (nodeId: string, text: string) => {
-      setNodes((currentNodes) => {
-        const nextNodes = currentNodes.map((node) =>
-          node.id === nodeId
-            ? { ...node, data: { ...node.data, text } }
-            : node,
-        );
-        nodesRef.current = nextNodes;
-        return nextNodes;
-      });
-      markDirty();
-    },
-    [markDirty],
-  );
-
-  const addNode = useCallback(
-    (type: GraphNodeType) => {
-      const canvasBounds = canvasRef.current?.getBoundingClientRect();
-      const screenPosition = {
-        x: canvasBounds ? canvasBounds.left + canvasBounds.width / 2 : 320,
-        y: canvasBounds ? canvasBounds.top + canvasBounds.height / 2 : 240,
-      };
-      const flowPosition = flowInstanceRef.current?.screenToFlowPosition(
-        screenPosition,
-      ) ?? { x: 0, y: 0 };
-      const node: WorkspaceNode = {
+  const addNode = useCallback(async () => {
+    const canvasBounds = canvasRef.current?.getBoundingClientRect();
+    const screenPosition = {
+      x: canvasBounds ? canvasBounds.left + canvasBounds.width / 2 : 320,
+      y: canvasBounds ? canvasBounds.top + canvasBounds.height / 2 : 240,
+    };
+    const flowPosition = flowInstanceRef.current?.screenToFlowPosition(
+      screenPosition,
+    ) ?? { x: 0, y: 0 };
+    const position = findAvailablePosition(flowPosition, nodesRef.current);
+    setSaveState("saving");
+    try {
+      await createDesignNode(projectId, {
         id: crypto.randomUUID(),
-        type,
-        position: findAvailablePosition(flowPosition, nodesRef.current),
-        data: type === "prompt" ? { text: "" } : {},
-      };
-
-      setNodes((currentNodes) => {
-        const nextNodes = [...currentNodes, node];
-        nodesRef.current = nextNodes;
-        return nextNodes;
+        position,
       });
-      markDirty();
+      await refreshWorkspace();
+      if (mountedRef.current) setSaveState("saved");
+    } catch {
+      if (mountedRef.current) setSaveState("failed");
+    }
+  }, [projectId, refreshWorkspace]);
+
+  const selectVersion = useCallback(
+    (nodeId: string, versionId: string) => {
+      updateNodeData(nodeId, { activeVersionId: versionId });
+      void persistNodePatch(nodeId, { active_version_id: versionId });
     },
-    [markDirty],
+    [persistNodePatch, updateNodeData],
+  );
+
+  const branchVersion = useCallback(
+    async (nodeId: string, versionId: string) => {
+      const source = nodesRef.current.find((node) => node.id === nodeId);
+      if (!source) return;
+      const preferred = { x: source.position.x + 380, y: source.position.y };
+      const position = findAvailablePosition(preferred, nodesRef.current);
+      setSaveState("saving");
+      try {
+        await createBranch(projectId, versionId, {
+          id: crypto.randomUUID(),
+          position,
+        });
+        await refreshWorkspace();
+        if (mountedRef.current) setSaveState("saved");
+      } catch {
+        if (mountedRef.current) setSaveState("failed");
+      }
+    },
+    [projectId, refreshWorkspace],
+  );
+
+  const runNode = useCallback(
+    async (nodeId: string) => {
+      const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+      if (!node || !node.data.prompt.trim()) return;
+      const timer = patchTimersRef.current.get(nodeId);
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        patchTimersRef.current.delete(nodeId);
+      }
+      updateNodeData(nodeId, { runState: "running", runError: null });
+      try {
+        await patchDesignNode(projectId, nodeId, {
+          prompt: node.data.prompt,
+          title: node.data.title,
+        });
+        let job = await submitRun(projectId, nodeId, crypto.randomUUID());
+        while (job.status !== "complete" && job.status !== "failed") {
+          await new Promise((resolve) => window.setTimeout(resolve, 750));
+          job = await getRun(projectId, job.id);
+        }
+        if (job.status === "failed") {
+          throw new Error(job.error ?? "Run failed");
+        }
+        await refreshWorkspace();
+        if (mountedRef.current) setSaveState("saved");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Run failed";
+        if (mountedRef.current) {
+          updateNodeData(nodeId, { runState: "failed", runError: message });
+          setSaveState("failed");
+        }
+      }
+    },
+    [projectId, refreshWorkspace, updateNodeData],
+  );
+
+  const actions = useMemo(
+    () => ({
+      updatePrompt,
+      updateTitle,
+      selectVersion,
+      branchVersion,
+      runNode,
+    }),
+    [branchVersion, runNode, selectVersion, updatePrompt, updateTitle],
   );
 
   return (
-    <PromptNodeActionsContext.Provider value={updatePromptText}>
+    <DesignNodeActionsContext.Provider value={actions}>
       <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-white">
         <header className="grid h-14 shrink-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center border-b border-border px-4 sm:px-6">
           <Link
@@ -300,7 +406,7 @@ export function GraphWorkspace({
             fitViewOptions={fitViewOptions}
             nodeTypes={nodeTypes}
             nodes={nodes}
-            onConnect={onConnect}
+            onConnect={(connection) => void onConnect(connection)}
             onEdgesChange={onEdgesChange}
             onInit={(instance) => {
               flowInstanceRef.current = instance;
@@ -314,12 +420,12 @@ export function GraphWorkspace({
               variant={BackgroundVariant.Dots}
             />
             <Panel position="top-left">
-              <AddNodeControl onAdd={addNode} />
+              <AddNodeControl onAdd={() => void addNode()} />
             </Panel>
             <Controls showInteractive={false} />
           </ReactFlow>
         </main>
       </div>
-    </PromptNodeActionsContext.Provider>
+    </DesignNodeActionsContext.Provider>
   );
 }

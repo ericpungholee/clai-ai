@@ -1,54 +1,129 @@
 import uuid
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+
+from app.domain.runs import FrozenRunRequest, Op
+from app.main import app
+from app.models.graph import GraphEdge, RunJob, Version, VersionMetric
+from app.providers.base import ProviderJob, ProviderResult
+from app.services.run_execution import (
+    ChangeMagnitudeResult,
+    execute_run_job,
+)
+from app.services.run_queue import get_run_enqueuer
+from app.storage.artifacts import StoredArtifact
+from tests.conftest import TestingSessionLocal
 
 
-def create_project(client: TestClient, name: str = "Lamp") -> str:
+class CapturingEnqueuer:
+    def __init__(self) -> None:
+        self.job_ids: list[uuid.UUID] = []
+
+    def enqueue(self, job_id: uuid.UUID) -> None:
+        self.job_ids.append(job_id)
+
+
+class FakeProvider:
+    id = "fake"
+
+    def __init__(self) -> None:
+        self.requests: list[FrozenRunRequest] = []
+
+    def execute(self, request: FrozenRunRequest) -> ProviderJob:
+        self.requests.append(request)
+        return ProviderJob(
+            provider="fake",
+            model="fixture-image-v1",
+            endpoint=f"fake/{request.op.value}",
+            request_id=f"fake-{len(self.requests)}",
+            request_payload={
+                "prompt": request.prompt_at_runtime,
+                "seed": request.seed,
+            },
+        )
+
+    def result(self, job: ProviderJob) -> ProviderResult:
+        return ProviderResult(
+            job=job,
+            output_url=f"https://fake.provider/{job.request_id}.png",
+            content_type="image/png",
+            width=1024,
+            height=1024,
+            response_metadata={"fixture": True},
+        )
+
+
+class FakeIngestor:
+    def ingest(self, result: ProviderResult) -> StoredArtifact:
+        output_name = (
+            "same-shoe-navy.png"
+            if result.job.endpoint.endswith("edit_instruct")
+            else "original-shoe.png"
+        )
+        return StoredArtifact(
+            storage_key=f"fake/{output_name}",
+            artifact_url=f"https://cdn.clai.test/{output_name}",
+            content_type="image/png",
+            byte_size=18,
+            sha256="a" * 64,
+        )
+
+
+class FakeDinoV2Scorer:
+    def score(
+        self, *, request: FrozenRunRequest, artifact: StoredArtifact
+    ) -> ChangeMagnitudeResult:
+        assert request.op is Op.EDIT_INSTRUCT
+        assert artifact.artifact_url.endswith("same-shoe-navy.png")
+        return ChangeMagnitudeResult(
+            method="dinov2_cosine", status="complete", value=0.9301
+        )
+
+
+def create_project(client: TestClient, name: str = "Footwear") -> str:
     response = client.post("/api/projects", json={"name": name})
     assert response.status_code == 201
     return response.json()["id"]
 
 
-def prompt_node(
-    node_id: str,
-    text: str = "Minimal aluminum desk lamp",
-    x: float = 120,
-    y: float = 200,
+def create_node(
+    client: TestClient,
+    project_id: str,
+    *,
+    prompt: str,
+    x: float = 100,
+    y: float = 100,
 ) -> dict[str, object]:
-    return {
-        "id": node_id,
-        "type": "prompt",
-        "position": {"x": x, "y": y},
-        "data": {"text": text},
-    }
+    response = client.post(
+        f"/api/projects/{project_id}/nodes",
+        json={"prompt": prompt, "position": {"x": x, "y": y}},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
 
 
-def image_node(node_id: str, x: float = 420, y: float = 200) -> dict[str, object]:
-    return {
-        "id": node_id,
-        "type": "image",
-        "position": {"x": x, "y": y},
-        "data": {},
-    }
-
-
-def model_node(node_id: str, x: float = 720, y: float = 200) -> dict[str, object]:
-    return {
-        "id": node_id,
-        "type": "model3d",
-        "position": {"x": x, "y": y},
-        "data": {},
-    }
-
-
-def graph_edge(edge_id: str, source: str, target: str) -> dict[str, object]:
-    return {
-        "id": edge_id,
-        "source": source,
-        "target": target,
-        "source_handle": "source",
-        "target_handle": "target",
-    }
+def submit_and_execute(
+    client: TestClient,
+    project_id: str,
+    node_id: str,
+    enqueuer: CapturingEnqueuer,
+    provider: FakeProvider,
+) -> tuple[dict[str, object], uuid.UUID]:
+    response = client.post(
+        f"/api/projects/{project_id}/nodes/{node_id}/runs",
+        json={"idempotency_key": str(uuid.uuid4())},
+    )
+    assert response.status_code == 202, response.text
+    job_id = enqueuer.job_ids[-1]
+    version_id = execute_run_job(
+        job_id=job_id,
+        session_factory=TestingSessionLocal,
+        provider=provider,
+        ingestor=FakeIngestor(),
+        scorer=FakeDinoV2Scorer(),
+    )
+    return response.json(), version_id
 
 
 def test_empty_project_returns_empty_graph(client: TestClient) -> None:
@@ -60,234 +135,202 @@ def test_empty_project_returns_empty_graph(client: TestClient) -> None:
     assert response.json() == {"nodes": [], "edges": []}
 
 
-def test_saved_nodes_and_edges_survive_retrieval(client: TestClient) -> None:
-    project_id = create_project(client)
-    source_id = str(uuid.uuid4())
-    target_id = str(uuid.uuid4())
-    model_id = str(uuid.uuid4())
-    edge_id = str(uuid.uuid4())
-    graph = {
-        "nodes": [
-            prompt_node(source_id),
-            image_node(target_id),
-            model_node(model_id),
-        ],
-        "edges": [graph_edge(edge_id, source_id, target_id)],
-    }
-
-    save_response = client.put(f"/api/projects/{project_id}/graph", json=graph)
-    load_response = client.get(f"/api/projects/{project_id}/graph")
-
-    assert save_response.status_code == 200
-    assert load_response.status_code == 200
-    assert load_response.json() == save_response.json()
-    assert {node["id"]: node for node in load_response.json()["nodes"]} == {
-        node["id"]: node for node in graph["nodes"]
-    }
-    assert load_response.json()["edges"] == graph["edges"]
-
-
-def test_graph_save_updates_prompt_and_position_without_duplicates(
+def test_scoped_node_create_and_patch_preserve_position_and_prompt(
     client: TestClient,
 ) -> None:
     project_id = create_project(client)
-    node_id = str(uuid.uuid4())
-    initial_graph = {"nodes": [prompt_node(node_id)], "edges": []}
-    latest_graph = {
-        "nodes": [prompt_node(node_id, text="Portable task light", x=-40, y=315.5)],
-        "edges": [],
-    }
+    node = create_node(client, project_id, prompt="A blue shoe")
 
-    first_response = client.put(
-        f"/api/projects/{project_id}/graph",
-        json=initial_graph,
-    )
-    repeat_response = client.put(
-        f"/api/projects/{project_id}/graph",
-        json=initial_graph,
-    )
-    latest_response = client.put(
-        f"/api/projects/{project_id}/graph",
-        json=latest_graph,
-    )
-
-    assert first_response.status_code == 200
-    assert repeat_response.json() == first_response.json()
-    assert latest_response.status_code == 200
-    assert latest_response.json() == latest_graph
-    assert client.get(f"/api/projects/{project_id}/graph").json() == latest_graph
-
-
-def test_repeated_save_does_not_duplicate_edges(client: TestClient) -> None:
-    project_id = create_project(client)
-    source_id = str(uuid.uuid4())
-    target_id = str(uuid.uuid4())
-    edge_id = str(uuid.uuid4())
-    graph = {
-        "nodes": [prompt_node(source_id), image_node(target_id)],
-        "edges": [graph_edge(edge_id, source_id, target_id)],
-    }
-
-    first_response = client.put(f"/api/projects/{project_id}/graph", json=graph)
-    second_response = client.put(f"/api/projects/{project_id}/graph", json=graph)
-
-    assert first_response.status_code == 200
-    assert second_response.status_code == 200
-    assert {node["id"]: node for node in second_response.json()["nodes"]} == {
-        node["id"]: node for node in graph["nodes"]
-    }
-    assert second_response.json()["edges"] == graph["edges"]
-    assert len(second_response.json()["edges"]) == 1
-
-
-def test_edge_removal_is_persistent(client: TestClient) -> None:
-    project_id = create_project(client)
-    source_id = str(uuid.uuid4())
-    target_id = str(uuid.uuid4())
-    graph = {
-        "nodes": [prompt_node(source_id), image_node(target_id)],
-        "edges": [graph_edge(str(uuid.uuid4()), source_id, target_id)],
-    }
-
-    client.put(f"/api/projects/{project_id}/graph", json=graph)
-    response = client.put(
-        f"/api/projects/{project_id}/graph",
-        json={"nodes": graph["nodes"], "edges": []},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["edges"] == []
-    assert client.get(f"/api/projects/{project_id}/graph").json()["edges"] == []
-
-
-def test_removing_node_removes_connected_edge(client: TestClient) -> None:
-    project_id = create_project(client)
-    source_id = str(uuid.uuid4())
-    target_id = str(uuid.uuid4())
-    graph = {
-        "nodes": [prompt_node(source_id), image_node(target_id)],
-        "edges": [graph_edge(str(uuid.uuid4()), source_id, target_id)],
-    }
-
-    client.put(f"/api/projects/{project_id}/graph", json=graph)
-    response = client.put(
-        f"/api/projects/{project_id}/graph",
-        json={"nodes": [graph["nodes"][0]], "edges": []},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {"nodes": [graph["nodes"][0]], "edges": []}
-    assert client.get(f"/api/projects/{project_id}/graph").json() == response.json()
-
-
-def test_graph_routes_return_not_found_for_missing_project(
-    client: TestClient,
-) -> None:
-    project_id = uuid.uuid4()
-
-    get_response = client.get(f"/api/projects/{project_id}/graph")
-    put_response = client.put(
-        f"/api/projects/{project_id}/graph",
-        json={"nodes": [], "edges": []},
-    )
-
-    assert get_response.status_code == 404
-    assert put_response.status_code == 404
-    assert get_response.json() == {"detail": "Project not found"}
-    assert put_response.json() == {"detail": "Project not found"}
-
-
-def test_graph_rejects_invalid_node_type(client: TestClient) -> None:
-    project_id = create_project(client)
-    node = prompt_node(str(uuid.uuid4()))
-    node["type"] = "generic"
-
-    response = client.put(
-        f"/api/projects/{project_id}/graph",
-        json={"nodes": [node], "edges": []},
-    )
-
-    assert response.status_code == 422
-    assert client.get(f"/api/projects/{project_id}/graph").json() == {
-        "nodes": [],
-        "edges": [],
-    }
-
-
-def test_graph_rejects_edge_with_missing_endpoint(client: TestClient) -> None:
-    project_id = create_project(client)
-    source_id = str(uuid.uuid4())
-
-    response = client.put(
-        f"/api/projects/{project_id}/graph",
+    response = client.patch(
+        f"/api/projects/{project_id}/nodes/{node['id']}",
         json={
-            "nodes": [prompt_node(source_id)],
-            "edges": [graph_edge(str(uuid.uuid4()), source_id, str(uuid.uuid4()))],
+            "title": "Runner",
+            "prompt": "A low-profile running shoe",
+            "position": {"x": -40, "y": 315.5},
         },
     )
 
-    assert response.status_code == 422
-    assert "Edge endpoints" in response.text
+    assert response.status_code == 200
+    saved = client.get(f"/api/projects/{project_id}/graph").json()["nodes"][0]
+    assert saved["title"] == "Runner"
+    assert saved["prompt"] == "A low-profile running shoe"
+    assert saved["position"] == {"x": -40.0, "y": 315.5}
 
 
-def test_graph_rejects_non_finite_position(client: TestClient) -> None:
+def test_node_validation_rejects_non_finite_position(client: TestClient) -> None:
     project_id = create_project(client)
-    node_id = uuid.uuid4()
-    payload = (
-        '{"nodes":[{"id":"'
-        f"{node_id}"
-        '","type":"prompt","position":{"x":1e309,"y":0},'
-        '"data":{"text":"Lamp"}}],"edges":[]}'
-    )
+    payload = '{"prompt":"shoe","position":{"x":1e309,"y":0}}'
 
-    response = client.put(
-        f"/api/projects/{project_id}/graph",
+    response = client.post(
+        f"/api/projects/{project_id}/nodes",
         content=payload,
         headers={"Content-Type": "application/json"},
     )
 
     assert response.status_code == 422
-    assert client.get(f"/api/projects/{project_id}/graph").json() == {
-        "nodes": [],
-        "edges": [],
-    }
+    assert client.get(f"/api/projects/{project_id}/graph").json()["nodes"] == []
 
 
-def test_graph_rejects_ids_owned_by_another_project(client: TestClient) -> None:
-    first_project_id = create_project(client, "First")
-    second_project_id = create_project(client, "Second")
-    node_id = str(uuid.uuid4())
-    first_graph = {"nodes": [prompt_node(node_id)], "edges": []}
-    client.put(f"/api/projects/{first_project_id}/graph", json=first_graph)
+def test_run_submit_is_idempotent_and_enqueues_once(client: TestClient) -> None:
+    project_id = create_project(client)
+    node = create_node(client, project_id, prompt="A shoe")
+    enqueuer = CapturingEnqueuer()
+    app.dependency_overrides[get_run_enqueuer] = lambda: enqueuer
+    key = str(uuid.uuid4())
 
-    response = client.put(
-        f"/api/projects/{second_project_id}/graph",
-        json=first_graph,
+    first = client.post(
+        f"/api/projects/{project_id}/nodes/{node['id']}/runs",
+        json={"idempotency_key": key},
+    )
+    second = client.post(
+        f"/api/projects/{project_id}/nodes/{node['id']}/runs",
+        json={"idempotency_key": key},
     )
 
-    assert response.status_code == 422
-    assert response.json() == {
-        "detail": "Graph contains resources owned by another project"
-    }
-    assert client.get(f"/api/projects/{second_project_id}/graph").json() == {
-        "nodes": [],
-        "edges": [],
-    }
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json()["id"] == second.json()["id"]
+    assert enqueuer.job_ids == [uuid.UUID(first.json()["id"])]
 
 
-def test_invalid_graph_does_not_replace_persisted_graph(client: TestClient) -> None:
+def test_base_drag_replaces_existing_pin(client: TestClient) -> None:
     project_id = create_project(client)
-    node_id = str(uuid.uuid4())
-    graph = {"nodes": [prompt_node(node_id)], "edges": []}
-    client.put(f"/api/projects/{project_id}/graph", json=graph)
+    enqueuer = CapturingEnqueuer()
+    app.dependency_overrides[get_run_enqueuer] = lambda: enqueuer
+    provider = FakeProvider()
+    first = create_node(client, project_id, prompt="First shoe")
+    second = create_node(client, project_id, prompt="Second shoe", x=350)
+    target = create_node(client, project_id, prompt="make it navy", x=650)
+    _, first_version = submit_and_execute(
+        client, project_id, str(first["id"]), enqueuer, provider
+    )
+    _, second_version = submit_and_execute(
+        client, project_id, str(second["id"]), enqueuer, provider
+    )
 
-    invalid_response = client.put(
-        f"/api/projects/{project_id}/graph",
+    first_edge = client.put(
+        f"/api/projects/{project_id}/nodes/{target['id']}/base",
+        json={"source_node_id": first["id"], "version_id": str(first_version)},
+    )
+    second_edge = client.put(
+        f"/api/projects/{project_id}/nodes/{target['id']}/base",
+        json={"source_node_id": second["id"], "version_id": str(second_version)},
+    )
+
+    assert first_edge.status_code == 200
+    assert second_edge.status_code == 200
+    assert first_edge.json()["id"] == second_edge.json()["id"]
+    graph = client.get(f"/api/projects/{project_id}/graph").json()
+    assert len(graph["edges"]) == 1
+    assert graph["edges"][0]["pin"] == {
+        "mode": "version",
+        "version_id": str(second_version),
+    }
+
+
+def test_branch_from_historical_version_creates_pinned_base(
+    client: TestClient,
+) -> None:
+    project_id = create_project(client)
+    enqueuer = CapturingEnqueuer()
+    app.dependency_overrides[get_run_enqueuer] = lambda: enqueuer
+    source = create_node(client, project_id, prompt="A shoe")
+    _, version_id = submit_and_execute(
+        client, project_id, str(source["id"]), enqueuer, FakeProvider()
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/versions/{version_id}/branches",
+        json={"position": {"x": 450, "y": 100}},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["edge"]["pin"]["version_id"] == str(version_id)
+    assert response.json()["node"]["versions"] == []
+
+
+def test_navy_shoe_acceptance_runs_real_pipeline_with_fake_provider(
+    client: TestClient,
+) -> None:
+    project_id = create_project(client)
+    enqueuer = CapturingEnqueuer()
+    app.dependency_overrides[get_run_enqueuer] = lambda: enqueuer
+    provider = FakeProvider()
+
+    shoe = create_node(client, project_id, prompt="A blue and yellow running shoe")
+    _, base_version_id = submit_and_execute(
+        client, project_id, str(shoe["id"]), enqueuer, provider
+    )
+    branch = create_node(client, project_id, prompt="make it navy", x=440)
+    wire = client.put(
+        f"/api/projects/{project_id}/nodes/{branch['id']}/base",
         json={
-            "nodes": [],
-            "edges": [graph_edge(str(uuid.uuid4()), node_id, str(uuid.uuid4()))],
+            "source_node_id": shoe["id"],
+            "version_id": str(base_version_id),
         },
     )
+    assert wire.status_code == 200
+    preview = client.get(f"/api/projects/{project_id}/nodes/{branch['id']}/run-preview")
+    assert preview.json() == {"op": "edit_instruct"}
 
-    assert invalid_response.status_code == 422
-    assert client.get(f"/api/projects/{project_id}/graph").json() == graph
+    queued = client.post(
+        f"/api/projects/{project_id}/nodes/{branch['id']}/runs",
+        json={"idempotency_key": "navy-shoe-acceptance"},
+    )
+    assert queued.status_code == 202
+    job_id = enqueuer.job_ids[-1]
+
+    client.patch(
+        f"/api/projects/{project_id}/nodes/{branch['id']}",
+        json={"prompt": "this live prompt must not reach the queued worker"},
+    )
+    navy_version_id = execute_run_job(
+        job_id=job_id,
+        session_factory=TestingSessionLocal,
+        provider=provider,
+        ingestor=FakeIngestor(),
+        scorer=FakeDinoV2Scorer(),
+    )
+
+    assert provider.requests[-1].prompt_at_runtime.endswith(
+        "Change only: make it navy\nDo not restyle or reinterpret any other element."
+    )
+    assert provider.requests[-1].input_snapshot.base_version_id == str(base_version_id)
+    graph = client.get(f"/api/projects/{project_id}/graph").json()
+    target = next(node for node in graph["nodes"] if node["id"] == branch["id"])
+    assert target["active_version_id"] == str(navy_version_id)
+    assert len(target["versions"]) == 1
+    assert target["versions"][0]["artifact_url"].endswith("same-shoe-navy.png")
+    assert target["versions"][0]["input_snapshot"] == {
+        "base_version_id": str(base_version_id),
+        "connect_version_ids": [],
+        "mask_hash": None,
+    }
+    with TestingSessionLocal() as db:
+        metric = db.get(VersionMetric, navy_version_id)
+        assert metric is not None
+        assert metric.op == "edit_instruct"
+        assert metric.method == "dinov2_cosine"
+        assert metric.change_magnitude == 0.9301
+        assert db.scalar(select(RunJob.status).where(RunJob.id == job_id)) == "complete"
+
+
+def test_commit_is_idempotent_at_version_boundary(client: TestClient) -> None:
+    project_id = create_project(client)
+    enqueuer = CapturingEnqueuer()
+    app.dependency_overrides[get_run_enqueuer] = lambda: enqueuer
+    node = create_node(client, project_id, prompt="A shoe")
+    _, version_id = submit_and_execute(
+        client, project_id, str(node["id"]), enqueuer, FakeProvider()
+    )
+
+    with TestingSessionLocal() as db:
+        versions = list(
+            db.scalars(
+                select(Version).where(Version.node_id == uuid.UUID(str(node["id"])))
+            )
+        )
+        edges = list(db.scalars(select(GraphEdge)))
+
+    assert [version.id for version in versions] == [version_id]
+    assert edges == []

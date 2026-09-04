@@ -1,14 +1,16 @@
 # Clai
 
-Clai is a graph-based workspace for exploring product ideas.
+Clai is a node-based canvas for concepting physical products with AI. Wiring an immutable image version into another node as its base changes the next run from generation to an identity-preserving edit.
 
-## Current functionality
+## P0 functionality
 
-- Create and browse projects.
-- Build project graphs on an infinite React Flow canvas.
-- Create, move, connect, select, edit, and delete graph nodes and edges.
-- Use prompt, image, and 3D node structures.
-- Restore project graphs from PostgreSQL with debounced automatic saving.
+- Unified design nodes with prompts, active artifacts, pinned-base thumbnails, version strips, and pre-run operation chips.
+- Base wires pin a specific immutable version. A second base wire replaces the first atomically.
+- Branch creation from any historical version.
+- Pure input resolution, operation routing, preservation-prompt construction, seed inheritance, and request freezing before enqueue.
+- Durable database-backed run jobs transported by Celery.
+- Nano Banana Pro generation/edit dispatch through fal, followed by first-party artifact ingestion.
+- Insert-only versions with provenance and internal per-operation DINOv2 change telemetry.
 
 ## Stack
 
@@ -19,14 +21,12 @@ Clai is a graph-based workspace for exploring product ideas.
 
 ## Architecture
 
-Next.js server components load projects and graph documents from FastAPI. React
-Flow owns immediate client-side graph interaction, then sends debounced document
-updates through FastAPI. FastAPI validates and synchronizes nodes and edges in a
-single PostgreSQL transaction. Nodes and edges use separate tables, with JSONB
-reserved for node-specific data.
+React Flow owns immediate pan, zoom, selection, and drag state. Scoped FastAPI mutations persist nodes and pinned base edges without rewriting the graph. Run submission resolves and freezes the graph synchronously into `run_jobs`; workers dispatch only that frozen request and never re-resolve live wiring. Provider output is copied into Clai storage before a transaction appends the version and advances the node's active version.
 
 ```text
-Next.js and React Flow → FastAPI → PostgreSQL
+React Flow → scoped FastAPI mutations → PostgreSQL
+                         ↓
+                 frozen run_jobs → Celery → fal → Clai artifact storage
 ```
 
 ## Local development
@@ -60,6 +60,7 @@ Open:
 
 ```bash
 make test
+make test-postgres
 make lint
 npm --prefix frontend run build
 ```
@@ -78,3 +79,5 @@ make db-shell
 
 `GET /health` checks the API process. `GET /health/ready` verifies PostgreSQL
 and Redis connectivity. PostgreSQL data persists across `make down`.
+
+The PostgreSQL suite uses a disposable test service and validates the version-mutation trigger, role/pin constraint, one-base partial index, graph reset migration, concurrent two-connect cap, and full fake-provider navy-shoe path. Automated tests never call fal.

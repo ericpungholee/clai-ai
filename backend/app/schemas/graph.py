@@ -1,14 +1,12 @@
 import uuid
-from enum import StrEnum
-from typing import Self
+from datetime import datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, JsonValue, model_validator
+from pydantic import BaseModel, Field, JsonValue, StringConstraints
 
+from app.domain.runs import Op
 
-class GraphNodeType(StrEnum):
-    PROMPT = "prompt"
-    IMAGE = "image"
-    MODEL3D = "model3d"
+Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class GraphPosition(BaseModel):
@@ -16,40 +14,123 @@ class GraphPosition(BaseModel):
     y: float = Field(allow_inf_nan=False)
 
 
+class NodeSettingsData(BaseModel):
+    aspect_ratio: str = Field(default="1:1", min_length=1, max_length=16)
+    width: int = Field(default=1024, ge=1, le=4096)
+    height: int = Field(default=1024, ge=1, le=4096)
+
+
+class VersionData(BaseModel):
+    id: uuid.UUID
+    node_id: uuid.UUID
+    created_at: datetime
+    artifact_url: str
+    op: Op
+    provider: str
+    model: str
+    endpoint: str
+    params: dict[str, JsonValue]
+    seed: int
+    input_snapshot: dict[str, JsonValue]
+    prompt_at_runtime: str
+    edit_depth: int
+
+
 class GraphNodeData(BaseModel):
     id: uuid.UUID
-    type: GraphNodeType
+    title: str
+    prompt: str
+    settings: NodeSettingsData
+    seed: int | None
+    active_version_id: uuid.UUID | None
     position: GraphPosition
-    data: dict[str, JsonValue] = Field(default_factory=dict)
+    versions: list[VersionData]
+
+
+class VersionPinData(BaseModel):
+    mode: Literal["version"] = "version"
+    version_id: uuid.UUID
+
+
+class ActivePinData(BaseModel):
+    mode: Literal["active"] = "active"
+
+
+PinData = Annotated[VersionPinData | ActivePinData, Field(discriminator="mode")]
 
 
 class GraphEdgeData(BaseModel):
     id: uuid.UUID
-    source: uuid.UUID
-    target: uuid.UUID
-    source_handle: str | None = Field(default=None, max_length=120)
-    target_handle: str | None = Field(default=None, max_length=120)
+    source_node_id: uuid.UUID
+    target_node_id: uuid.UUID
+    role: Literal["base", "connect"]
+    pin: PinData
+    order: int | None = None
 
 
 class GraphDocument(BaseModel):
     nodes: list[GraphNodeData]
     edges: list[GraphEdgeData]
 
-    @model_validator(mode="after")
-    def validate_graph(self) -> Self:
-        node_ids = [node.id for node in self.nodes]
-        edge_ids = [edge.id for edge in self.edges]
 
-        if len(node_ids) != len(set(node_ids)):
-            raise ValueError("Node IDs must be unique")
-        if len(edge_ids) != len(set(edge_ids)):
-            raise ValueError("Edge IDs must be unique")
+class NodeCreate(BaseModel):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    title: Title = "Untitled concept"
+    prompt: str = Field(default="", max_length=8000)
+    settings: NodeSettingsData = Field(default_factory=NodeSettingsData)
+    seed: int | None = None
+    position: GraphPosition
 
-        known_node_ids = set(node_ids)
-        if any(
-            edge.source not in known_node_ids or edge.target not in known_node_ids
-            for edge in self.edges
-        ):
-            raise ValueError("Edge endpoints must reference nodes in the graph")
 
-        return self
+class NodeUpdate(BaseModel):
+    title: Title | None = None
+    prompt: str | None = Field(default=None, max_length=8000)
+    settings: NodeSettingsData | None = None
+    seed: int | None = None
+    active_version_id: uuid.UUID | None = None
+    position: GraphPosition | None = None
+
+
+class BaseEdgeReplace(BaseModel):
+    source_node_id: uuid.UUID
+    version_id: uuid.UUID
+
+
+class BranchCreate(BaseModel):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    title: Title = "Untitled concept"
+    prompt: str = Field(default="", max_length=8000)
+    settings: NodeSettingsData = Field(default_factory=NodeSettingsData)
+    position: GraphPosition
+
+
+class BranchData(BaseModel):
+    node: GraphNodeData
+    edge: GraphEdgeData
+
+
+class RunPreviewData(BaseModel):
+    op: Op
+
+
+class RunSubmit(BaseModel):
+    idempotency_key: str = Field(min_length=1, max_length=120)
+
+
+class RunJobData(BaseModel):
+    id: uuid.UUID
+    node_id: uuid.UUID
+    status: Literal[
+        "queued",
+        "dispatching",
+        "provider_pending",
+        "ingesting",
+        "complete",
+        "failed",
+    ]
+    op: Op
+    attempts: int
+    error: str | None
+    version_id: uuid.UUID | None
+    created_at: datetime
+    completed_at: datetime | None

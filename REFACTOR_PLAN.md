@@ -1,10 +1,10 @@
 # Clai architecture refactor plan
 
-Status: Phase 0 audit and P0-zero spike accepted on 2026-09-03. Production P0 pure core and offline provider/storage work are complete; schema/jobs and UI are held at the mandatory one-call step-2 checkpoint. The amended preservation preamble, drift interpretation, live-call budget, and checkpoint below supersede earlier wording.
+Status: Phase 0 audit, P0-zero, and the one-call provider/storage checkpoint are accepted. Production P0 is implemented through schema/jobs and the unified canvas UI; the fake-provider acceptance path passes on PostgreSQL and is awaiting product acceptance before P1. The amended preservation preamble, drift interpretation, and live-call budget below supersede earlier wording.
 
 Audit basis: `main` at `a8dd694` on 2026-09-03. The worktree was clean before this report. The inventory below classifies all 69 tracked files plus the ignored project report at `.progress/current.md`. Local secrets (`.env`) and generated/vendor directories (`.git`, `.next`, `node_modules`, `.venv`, pytest/ruff caches, and TypeScript build output) are intentionally excluded. `REFACTOR_PLAN.md` itself did not exist at audit start and is not classified.
 
-No production code has been changed.
+The existing-architecture map below is the historical audit baseline. The production implementation now matches the P0 target described later in this document.
 
 ## Existing architecture map
 
@@ -158,9 +158,11 @@ Completed before production changes. The retained report and evidence are at `.p
 - Discarded the throwaway runner and retained the 100-pair seed corpus for drift regression work.
 - The amended preservation preamble was accepted exactly as proposed: `Preserve exactly every unmentioned attribute, including geometry, proportions, silhouette, camera angle, framing, lighting direction, and background.\nChange only: {resolved user prompt}\nDo not restyle or reinterpret any other element.`
 - Two removal failures used inapplicable fixed-list instructions and are not product regressions. The omitted concrete plinth is the sole genuine instruction miss in the spike.
-- The branded-image policy rejection is being investigated in a separate six-call probe and does not block P0.
+- The capped six-call branded-image probe passed all cases across a labelled bottle and logo'd shoe: Nano Banana Pro with and without brand names, and FLUX Fill. The earlier rejection did not reproduce, so no special P1 routing rule was added.
 
 ### Implementation P0 — thesis and durable foundation
+
+Implemented through step 4. The full fake-provider path passes against PostgreSQL: generate a shoe, pin its immutable version as another node's base, freeze “make it navy” before enqueue, ingest the fake output, append a new version, and advance the active pointer in the same transaction. P1 remains blocked on product acceptance.
 
 - Add the normalized node, edge, version, metric, and run-job schema, insert-only version enforcement, role/pin constraints, and the approved legacy-graph migration policy.
 - Preserve Project, React Flow pan/zoom/rendering behavior, Redis/Celery, and health checks.
@@ -302,4 +304,4 @@ Files are listed once under exactly one required heading. “ADAPT” may includ
 
 ## Approved working boundary
 
-P0 is approved in the internal order above. Stop after the one-call provider/storage checkpoint and report the navy-shoe result before starting schema/jobs or UI. The six-call content-policy probe runs independently and must be reported before P1 planning. Do not begin P1 until P0 is working and accepted.
+P0 implementation is complete and reported. The six-call content-policy probe also completed with all cases passing. Do not begin P1 until the P0 result is accepted.

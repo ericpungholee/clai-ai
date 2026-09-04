@@ -2,6 +2,7 @@ import os
 import tempfile
 from dataclasses import dataclass
 from hashlib import sha256
+from mimetypes import guess_type
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 from urllib.parse import urlparse
@@ -90,6 +91,27 @@ class HttpArtifactReader:
             content=b"".join(chunks),
             content_type=content_type.split(";", maxsplit=1)[0],
             filename=Path(parsed.path).name or "artifact.bin",
+        )
+
+
+class FileArtifactReader:
+    def __init__(self, *, root: Path, public_base_url: str) -> None:
+        self._root = root.resolve()
+        self._public_base_url = public_base_url.rstrip("/")
+
+    def read(self, artifact_url: str) -> ArtifactBytes:
+        prefix = f"{self._public_base_url}/"
+        if not artifact_url.startswith(prefix):
+            raise ArtifactStorageError("Artifact URL is outside the local store")
+        storage_key = artifact_url.removeprefix(prefix)
+        source = _safe_destination(self._root, storage_key)
+        if not source.is_file():
+            raise ArtifactStorageError("Local artifact does not exist")
+        content_type = guess_type(source.name)[0] or "application/octet-stream"
+        return ArtifactBytes(
+            content=source.read_bytes(),
+            content_type=content_type,
+            filename=source.name,
         )
 
 

@@ -2,7 +2,7 @@
 .env
 *.log
 .progress/
-.progress/p0-zero-spike/
+.data/
 
 # Python
 __pycache__/
