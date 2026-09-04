@@ -69,7 +69,7 @@ export const DesignNode = memo(function DesignNode({
         placeholder={
           data.subject
             ? "Describe one change — e.g. ‘square the base’, ‘brushed aluminium body’"
-            : "Describe the object — form, material, finish"
+            : "A compact desk lamp with a folded aluminium shade and a round walnut foot"
         }
         spellCheck
         value={data.prompt}
@@ -116,17 +116,19 @@ export const DesignNode = memo(function DesignNode({
       ) : null}
 
       <div className="mt-3 flex items-center justify-between gap-2">
-        <label className="nodrag flex items-center gap-1.5 text-[11px] text-neutral-600">
-          <input
-            checked={data.settings.whiteBackground}
-            className="h-3.5 w-3.5 accent-sky-600"
-            onChange={(event) =>
-              actions.updateWhiteBackground(id, event.target.checked)
-            }
-            type="checkbox"
-          />
-          White background
-        </label>
+        {!data.subject ? (
+          <label className="nodrag flex items-center gap-1.5 text-[11px] text-neutral-600">
+            <input
+              checked={data.settings.whiteBackground}
+              className="h-3.5 w-3.5 accent-sky-600"
+              onChange={(event) =>
+                actions.updateWhiteBackground(id, event.target.checked)
+              }
+              type="checkbox"
+            />
+            White background
+          </label>
+        ) : <span />}
         <button
           className="nodrag rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-300"
           disabled={!canRun}

@@ -376,14 +376,13 @@ def test_subject_migration_renames_data_and_restores_version_trigger(
             == "O"
         )
 
-    with pytest.raises(DBAPIError, match="versions are insert-only"):
-        with postgres_engine.begin() as connection:
-            connection.execute(
-                text(
-                    "UPDATE versions SET prompt_at_runtime = 'changed' WHERE id = :id"
-                ),
-                {"id": version_id},
-            )
+    for statement in (
+        "UPDATE versions SET prompt_at_runtime = 'changed' WHERE id = :id",
+        "DELETE FROM versions WHERE id = :id",
+    ):
+        with pytest.raises(DBAPIError, match="versions are insert-only"):
+            with postgres_engine.begin() as connection:
+                connection.execute(text(statement), {"id": version_id})
 
 
 def test_version_trigger_rejects_updates_and_deletes(

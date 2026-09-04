@@ -1,6 +1,6 @@
 # Clai architecture refactor plan
 
-Status: Phase 0 audit, P0-zero, and the one-call provider/storage checkpoint are accepted. Production P0 is implemented through schema/jobs and the unified canvas UI; the fake-provider acceptance path passes on PostgreSQL and is awaiting product acceptance before P1. The amended preservation preamble, drift interpretation, and live-call budget below supersede earlier wording.
+Status: The 2026-09-04 completion brief authorizes phases A–F and supersedes the historical phase gates and scope below. Auth, deployment, billing, failover, and extra provider integrations are not part of that completion scope. P0 and most P0.5 corrections were already on main. The eight-call Phase A preamble A/B is captured; the candidate is held for review because background texture and framing drift remain. See `docs/phase-a-preamble-ab.md` and `.progress/current.md`.
 
 Audit basis: `main` at `a8dd694` on 2026-09-03. The worktree was clean before this report. The inventory below classifies all 69 tracked files plus the ignored project report at `.progress/current.md`. Local secrets (`.env`) and generated/vendor directories (`.git`, `.next`, `node_modules`, `.venv`, pytest/ruff caches, and TypeScript build output) are intentionally excluded. `REFACTOR_PLAN.md` itself did not exist at audit start and is not classified.
 
@@ -304,4 +304,4 @@ Files are listed once under exactly one required heading. “ADAPT” may includ
 
 ## Approved working boundary
 
-P0 implementation is complete and reported. The six-call content-policy probe also completed with all cases passing. Do not begin P1 until the P0 result is accepted.
+The completion brief authorizes the remaining work as one PR per phase. The historical P0 acceptance gate above no longer blocks it. The preamble candidate must be reported with images before adoption; any background-drift finding must be brought back without additional paid tuning calls.

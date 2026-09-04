@@ -296,10 +296,13 @@ def test_generate_prompt_omits_white_background_clause_when_disabled(op: Op) -> 
     )
 
 
-def test_edit_prompt_never_receives_white_background_clause() -> None:
+@pytest.mark.parametrize(
+    "op", [Op.EDIT_INSTRUCT, Op.EDIT_INPAINT, Op.EDIT_COMPOSITE, Op.EDIT_REF_GUIDED]
+)
+def test_edit_prompt_never_receives_white_background_clause(op: Op) -> None:
     prompt = build_prompt(
         user_prompt="make it navy",
-        op=Op.EDIT_INSTRUCT,
+        op=op,
         white_background=True,
     )
     assert WHITE_BACKGROUND_CLAUSE not in prompt
