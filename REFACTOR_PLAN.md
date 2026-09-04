@@ -1,6 +1,6 @@
 # Clai architecture refactor plan
 
-Status: Phase 0 audit approved and P0-zero spike completed on 2026-09-03. Production P0 has not started; it is blocked pending acceptance of the spike report and its prompt-builder amendment.
+Status: Phase 0 audit and P0-zero spike accepted on 2026-09-03. Production P0 pure core and offline provider/storage work are complete; schema/jobs and UI are held at the mandatory one-call step-2 checkpoint. The amended preservation preamble, drift interpretation, live-call budget, and checkpoint below supersede earlier wording.
 
 Audit basis: `main` at `a8dd694` on 2026-09-03. The worktree was clean before this report. The inventory below classifies all 69 tracked files plus the ignored project report at `.progress/current.md`. Local secrets (`.env`) and generated/vendor directories (`.git`, `.next`, `node_modules`, `.venv`, pytest/ruff caches, and TypeScript build output) are intentionally excluded. `REFACTOR_PLAN.md` itself did not exist at audit start and is not classified.
 
@@ -116,7 +116,7 @@ The audit gates below were decided in the approved P0 implementation brief. That
 
 7. **SAM endpoint mismatch.** `fal-ai/sam-3/image` returns PNG mask files; `fal-ai/sam-3/image-rle` returns the RLE string/list the proposed data model expects. Recommendation: use the RLE endpoint and specify one canonical RLE dialect after a real response fixture is captured; “RLE” alone is not enough to guarantee decoder compatibility.
 
-8. **P0 acceptance and P3 scope conflict.** P0 requires verification by drift score, while drift score is scheduled for P3. Recommendation: implement the immutable metric storage and a baseline unmasked scorer in P0 for acceptance; P3 adds warnings, richer UI, regression dashboards, rebase, and masked scoring.
+8. **P0 acceptance and P3 scope conflict.** P0 stores unmasked DINOv2 change magnitude as internal telemetry and establishes per-operation fixture baselines. It is not a correctness or quality score. P0 acceptance is narrowly the visually validated shoe-recolor path landing in the existing shoe-recolor distribution. P3 surfaces only masked outside-feather-band pixel drift; raw unmasked drift never appears as a node quality indicator.
 
 9. **“Exact reruns” is too strong for mutable hosted model aliases.** A prompt, seed, params, and input snapshot reconstruct a request, but cannot guarantee identical pixels after a provider silently changes weights or preprocessing. Recommendation: store exact endpoint/model identifiers plus provider response metadata and call the feature “reconstruct run” unless a pinned provider snapshot is available.
 
@@ -156,7 +156,9 @@ Completed before production changes. The retained report and evidence are at `.p
 - Overall cosine was `0.9375`; the five shoe recolors averaged `0.9301` and all visibly retained the same footwear identity/configuration.
 - Observed three instruction failures, operation-dependent score behavior, wrong-surface selection for inapplicable material prompts, local/background drift, and a deterministic branded-image policy rejection.
 - Discarded the throwaway runner and retained the 100-pair seed corpus for drift regression work.
-- Proposed before production P0: qualify the preservation list as applying to every **unmentioned** attribute, because the static preamble's “preserve lighting direction” instruction conflicts with the prescribed relight edit. This wording change is pending approval.
+- The amended preservation preamble was accepted exactly as proposed: `Preserve exactly every unmentioned attribute, including geometry, proportions, silhouette, camera angle, framing, lighting direction, and background.\nChange only: {resolved user prompt}\nDo not restyle or reinterpret any other element.`
+- Two removal failures used inapplicable fixed-list instructions and are not product regressions. The omitted concrete plinth is the sole genuine instruction miss in the spike.
+- The branded-image policy rejection is being investigated in a separate six-call probe and does not block P0.
 
 ### Implementation P0 — thesis and durable foundation
 
@@ -168,8 +170,18 @@ Completed before production changes. The retained report and evidence are at `.p
 - Add run submit/status flow through the existing Celery worker, idempotent commit, and retry/reconciliation behavior.
 - Replace the split prompt/image UI with one runnable design node containing prompt, active artifact, base thumbnail, version strip, and pre-run resolved-op chip.
 - Support base edges pinned to a selected version, base replacement on a second drag, branch creation from a historical version, and immutable version append.
-- Add a baseline unmasked drift metric so P0's stated acceptance can be evaluated.
+- Add unmasked DINOv2 change magnitude as internal-only telemetry, with per-operation baselines computed from the saved 100-pair corpus. It must not be named or presented as correctness or quality.
+- Narrow drift-assisted acceptance to the visually validated shoe recolor fixture distribution (mean `0.9301`); do not infer a universal threshold from it.
 - Tests: all operation rows plus invalid states, edge cardinality under concurrency, pinned versus active resolution, seed precedence, no ancestor-prompt inheritance, preservation preamble, immutable version DB trigger, job idempotency, provider contract fixtures, and the navy-shoe integration path with a fake provider.
+
+#### P0 live-call budget
+
+- Every automated test, including the navy-shoe acceptance path, uses a fake provider.
+- The provider/storage checkpoint uses exactly one live Nano Banana Pro call against an existing shoe fixture and then stops for confirmation before schema and UI work.
+- Drift baselines and regression checks use the retained 100-pair corpus without provider calls.
+- Contract smoke tests are skipped by default and require both explicit invocation and secrets.
+- The separate content-policy probe is capped at six calls. Combined planned P0 spend is seven calls; any path that could bring P0 above roughly ten calls requires approval first.
+- Paid endpoints are never used as retry loops for payload debugging. Persist the first request/response and reproduce against a fixture or fake adapter.
 
 ### Implementation P1 — masking
 
@@ -191,7 +203,8 @@ Completed before production changes. The retained report and evidence are at `.p
 
 ### Implementation P3 — trust and branching integrity
 
-- Surface drift score and threshold policy; add regression fixtures and provider-change monitoring.
+- Surface masked outside-feather-band pixel drift only; it has the meaningful guarantee that untouched pixels should remain near-identical after deterministic compositing.
+- Keep raw unmasked DINOv2 change magnitude internal to per-operation regression telemetry and provider-change monitoring. Never display it on a node as a quality score.
 - Add edit-depth warning around the approved threshold and explicit rebase/collapse as a new run against the root base.
 - Add branch markers and jump navigation on the linear version strip.
 - Add version hiding/dependency counts while retaining provenance artifacts.
@@ -287,16 +300,6 @@ Files are listed once under exactly one required heading. “ADAPT” may includ
 - `backend/alembic/versions/.gitkeep` — the migrations directory is no longer empty.
 - `frontend/components/graph/model-node.tsx` — 3D as a node type directly violates the target; P4 reintroduces it as a version-scoped view toggle.
 
-## Approval requested
+## Approved working boundary
 
-Approval of this plan should explicitly confirm or revise:
-
-- Project ID is the brief's `canvasId`.
-- Version facts are immutable; metrics and meshes live in separate derived tables.
-- Only base/version and connect/active role-pin pairs are valid in v1.
-- `edit_composite` and its GPT Image 2 adapter are deferred to P2; FLUX Fill is reserved for single-base inpainting.
-- Masked provider outputs are feather-composited before storage when exact outside-mask pixels are required, and drift scoring excludes the feather band.
-- Existing placeholder graph rows may be reset while Project rows are retained.
-- Minimal durable object storage and baseline drift scoring move into implementation P0 because its acceptance criteria require them.
-
-After the P0-zero spike is reported and confirmed, begin implementation P0 only. Do not begin P1 masking until P0 is working and accepted.
+P0 is approved in the internal order above. Stop after the one-call provider/storage checkpoint and report the navy-shoe result before starting schema/jobs or UI. The six-call content-policy probe runs independently and must be reported before P1 planning. Do not begin P1 until P0 is working and accepted.
