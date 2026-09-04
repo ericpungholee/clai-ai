@@ -13,6 +13,7 @@ from app.schemas.graph import (
     GraphEdgeData,
     GraphNodeData,
     GraphPosition,
+    MaskData,
     NodeCreate,
     NodeSettingsData,
     NodeUpdate,
@@ -197,6 +198,14 @@ def serialize_node(node: GraphNode, versions: list[Version]) -> GraphNodeData:
         active_version_id=node.active_version_id,
         position=GraphPosition(x=node.position_x, y=node.position_y),
         versions=[serialize_version(version) for version in versions],
+        mask=MaskData(
+            rle=node.mask_rle,
+            width=node.mask_width,
+            height=node.mask_height,
+            subject_version_id=node.mask_subject_version_id,
+        )
+        if node.mask_rle is not None
+        else None,
     )
 
 

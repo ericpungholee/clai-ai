@@ -37,6 +37,13 @@ class VersionData(BaseModel):
     edit_depth: int
 
 
+class MaskData(BaseModel):
+    rle: str = Field(min_length=1, max_length=16000000)
+    width: int = Field(ge=1, le=4096)
+    height: int = Field(ge=1, le=4096)
+    subject_version_id: uuid.UUID
+
+
 class GraphNodeData(BaseModel):
     id: uuid.UUID
     title: str
@@ -46,6 +53,7 @@ class GraphNodeData(BaseModel):
     active_version_id: uuid.UUID | None
     position: GraphPosition
     versions: list[VersionData]
+    mask: MaskData | None = None
 
 
 class VersionPinData(BaseModel):

@@ -9,7 +9,9 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.providers.base import ArtifactBytes, ProviderResult
+from app.domain.runs import FrozenRunRequest
+from app.providers.base import ArtifactBytes, ArtifactReader, ProviderResult
+from app.services.masks import composite_masked_output
 
 
 @dataclass(frozen=True)
@@ -203,9 +205,38 @@ class S3ArtifactStore:
 
 
 class ArtifactIngestor:
-    def __init__(self, *, reader: HttpArtifactReader, store: ArtifactStore) -> None:
+    def __init__(
+        self,
+        *,
+        reader: HttpArtifactReader,
+        store: ArtifactStore,
+        subject_reader: ArtifactReader | None = None,
+    ) -> None:
         self._reader = reader
         self._store = store
+        self._subject_reader = subject_reader
+
+    def ingest_masked(
+        self, result: ProviderResult, request: FrozenRunRequest
+    ) -> tuple[StoredArtifact, float]:
+        if (
+            request.subject is None
+            or request.mask is None
+            or self._subject_reader is None
+        ):
+            raise ArtifactStorageError(
+                "Masked ingestion requires the frozen subject and mask"
+            )
+        original = self._subject_reader.read(request.subject.artifact_url)
+        generated = self._reader.read(result.output_url)
+        content, drift = composite_masked_output(
+            original=original.content, generated=generated.content, mask=request.mask
+        )
+        return self._store.put(
+            key=f"runs/{result.job.request_id}/output.png",
+            content=content,
+            content_type="image/png",
+        ), drift
 
     def ingest(self, result: ProviderResult) -> StoredArtifact:
         artifact = self._reader.read(result.output_url)

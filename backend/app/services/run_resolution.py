@@ -8,6 +8,7 @@ from app.domain.runs import (
     SubjectEdge,
     VersionSnapshot,
 )
+from app.services.masks import validate_mask
 
 
 class RunResolutionError(ValueError):
@@ -36,13 +37,16 @@ def resolve_inputs(
     subject = _resolve_subject(subject_edges[0], versions) if subject_edges else None
     connects = _resolve_connects(connect_edges, nodes, versions)
 
-    if target.mask is not None:
+    mask = target.mask
+    if mask is not None:
         if subject is None:
             raise RunResolutionError("A mask requires a resolved subject version")
         if target.mask.subject_version_id != subject.id:
             raise RunResolutionError(
                 "The mask is stale for the resolved subject version"
             )
+        if validate_mask(mask):
+            mask = None
 
     seed = target.seed
     if seed is None and subject is not None:
@@ -54,7 +58,7 @@ def resolve_inputs(
         node=target,
         subject=subject,
         connects=connects,
-        mask=target.mask,
+        mask=mask,
         seed=seed,
     )
 

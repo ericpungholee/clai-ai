@@ -374,7 +374,7 @@ def test_frozen_request_codec_rejects_legacy_base_vocabulary() -> None:
 
 
 def test_valid_mask_is_hashed_into_frozen_provenance() -> None:
-    mask = MaskSnapshot("encoded-rle", 128, 96, subject_version_id="subject")
+    mask = MaskSnapshot("1 5", 128, 96, subject_version_id="subject")
     target = NodeSnapshot(id="target", prompt="replace the mark", mask=mask)
     subject = version("subject", "source")
 

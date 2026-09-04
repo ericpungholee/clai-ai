@@ -62,4 +62,5 @@ def create_provider_output_ingestor(settings: Settings) -> ArtifactIngestor:
             allowed_hosts=frozenset(settings.fal_output_host_list)
         ),
         store=create_artifact_store(settings),
+        subject_reader=create_artifact_reader(settings),
     )

@@ -11,6 +11,8 @@ Clai is a node-based canvas for concepting physical products with AI. Wiring an 
 - Durable database-backed run jobs transported by Celery.
 - Nano Banana Pro generation/edit dispatch through fal, followed by first-party artifact ingestion.
 - Insert-only versions with provenance and internal per-operation DINOv2 change telemetry.
+- Subject-version-bound masks with brush, lasso, rectangle and SAM click/text selection.
+- FLUX Fill inpainting followed by a deterministic 3px composite seam; pixels outside that band are preserved from the original. Full-image selections become ordinary edits, and stale masks block runs.
 
 ## Stack
 
@@ -63,6 +65,8 @@ make test
 make test-postgres
 make lint
 npm --prefix frontend run build
+npm --prefix frontend test
+cd frontend && npx playwright test
 ```
 
 Useful development commands:

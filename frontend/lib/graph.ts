@@ -44,6 +44,14 @@ export type PersistedGraphNode = {
   active_version_id: string | null;
   position: { x: number; y: number };
   versions: Version[];
+  mask: MaskData | null;
+};
+
+export type MaskData = {
+  rle: string;
+  width: number;
+  height: number;
+  subject_version_id: string;
 };
 
 export type VersionPin = { mode: "version"; version_id: string };
@@ -77,6 +85,7 @@ export type DesignNodeData = {
   activeVersionId: string | null;
   versions: Version[];
   subject: SubjectPreview | null;
+  mask: MaskData | null;
   resolvedOp: Op;
   runState: "idle" | "running" | "failed";
   runError: string | null;
@@ -115,6 +124,37 @@ const serverApiUrl =
 
 const browserApiUrl =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+export async function saveMask(
+  projectId: string,
+  nodeId: string,
+  mask: MaskData | null,
+): Promise<MaskData | null> {
+  return apiRequest(
+    `${browserApiUrl}/api/projects/${projectId}/nodes/${nodeId}/mask`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(mask),
+    },
+  );
+}
+
+export async function selectMask(
+  projectId: string,
+  versionId: string,
+  text: string,
+  points: { x: number; y: number; label: 0 | 1 }[],
+): Promise<MaskData | null> {
+  return apiRequest(
+    `${browserApiUrl}/api/projects/${projectId}/versions/${versionId}/selection`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, points }),
+    },
+  );
+}
 
 export async function getGraph(projectId: string): Promise<GraphDocument> {
   return apiRequest<GraphDocument>(
@@ -274,9 +314,10 @@ export function toWorkspaceGraph(graph: GraphDocument): {
           activeVersionId: node.active_version_id,
           versions: node.versions,
           subject,
+          mask: node.mask,
           resolvedOp: resolveOp({
             hasSubject: subject !== null,
-            hasMask: false,
+            hasMask: subject !== null && node.mask !== null,
             connectCount: 0,
           }),
           runState: "idle" as const,
@@ -325,10 +366,7 @@ export function resolveOp(input: {
   return "edit_instruct";
 }
 
-async function apiRequest<T>(
-  input: string,
-  init?: RequestInit,
-): Promise<T> {
+async function apiRequest<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
