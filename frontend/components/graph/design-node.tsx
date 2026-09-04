@@ -1,19 +1,10 @@
 import type { NodeProps } from "@xyflow/react";
 import { memo } from "react";
 
-import type { Op, WorkspaceNode } from "@/lib/graph";
+import type { WorkspaceNode } from "@/lib/graph";
 
 import { useDesignNodeActions } from "./design-node-actions";
 import { NodeFrame } from "./node-frame";
-
-const operationLabels: Record<Op, string> = {
-  generate: "Generate",
-  generate_ref: "Generate · refs",
-  edit_instruct: "Edit subject",
-  edit_inpaint: "Edit selection",
-  edit_composite: "Composite edit",
-  edit_ref_guided: "Edit · refs",
-};
 
 export const DesignNode = memo(function DesignNode({
   id,
@@ -52,19 +43,19 @@ export const DesignNode = memo(function DesignNode({
         </div>
       )}
 
-      {data.base ? (
+      {data.subject ? (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 p-2">
           <ArtifactImage
-            alt={`${data.base.nodeTitle} pinned base`}
+            alt={`${data.subject.nodeTitle} pinned subject`}
             className="h-10 w-10 shrink-0 rounded-md object-cover"
-            src={data.base.artifactUrl}
+            src={data.subject.artifactUrl}
           />
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">
-              Pinned base
+              Subject
             </p>
             <p className="truncate text-xs text-neutral-700">
-              {data.base.nodeTitle}
+              {data.subject.nodeTitle}
             </p>
           </div>
         </div>
@@ -75,7 +66,11 @@ export const DesignNode = memo(function DesignNode({
         className="nodrag nowheel mt-3 min-h-20 w-full resize-none rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-sm leading-5 text-foreground outline-none placeholder:text-neutral-400 focus:border-sky-400"
         onChange={(event) => actions.updatePrompt(id, event.target.value)}
         onKeyDown={(event) => event.stopPropagation()}
-        placeholder="Describe what to create or change"
+        placeholder={
+          data.subject
+            ? "Describe one change — e.g. ‘square the base’, ‘brushed aluminium body’"
+            : "Describe the object — form, material, finish"
+        }
         spellCheck
         value={data.prompt}
       />
@@ -121,9 +116,17 @@ export const DesignNode = memo(function DesignNode({
       ) : null}
 
       <div className="mt-3 flex items-center justify-between gap-2">
-        <span className="rounded-full bg-neutral-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-600">
-          {operationLabels[data.resolvedOp]}
-        </span>
+        <label className="nodrag flex items-center gap-1.5 text-[11px] text-neutral-600">
+          <input
+            checked={data.settings.whiteBackground}
+            className="h-3.5 w-3.5 accent-sky-600"
+            onChange={(event) =>
+              actions.updateWhiteBackground(id, event.target.checked)
+            }
+            type="checkbox"
+          />
+          White background
+        </label>
         <button
           className="nodrag rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-300"
           disabled={!canRun}

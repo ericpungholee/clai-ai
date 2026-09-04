@@ -8,11 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.domain.runs import (
     ActivePin,
-    BaseEdge,
     ConnectEdge,
     MaskSnapshot,
     NodeSettings,
     NodeSnapshot,
+    SubjectEdge,
     VersionPin,
     VersionSnapshot,
 )
@@ -141,14 +141,14 @@ def _node_snapshot(node: GraphNode) -> NodeSnapshot:
         if (
             node.mask_width is None
             or node.mask_height is None
-            or node.mask_base_version_id is None
+            or node.mask_subject_version_id is None
         ):
             raise RunSubmissionError("Node mask is incomplete")
         mask = MaskSnapshot(
             rle=node.mask_rle,
             width=node.mask_width,
             height=node.mask_height,
-            base_version_id=str(node.mask_base_version_id),
+            subject_version_id=str(node.mask_subject_version_id),
         )
     return NodeSnapshot(
         id=str(node.id),
@@ -157,6 +157,9 @@ def _node_snapshot(node: GraphNode) -> NodeSnapshot:
             aspect_ratio=_setting_string(settings, "aspect_ratio"),
             width=_setting_integer(settings, "width"),
             height=_setting_integer(settings, "height"),
+            white_background=_setting_boolean(
+                settings, "whiteBackground", default=False
+            ),
         ),
         seed=node.seed,
         mask=mask,
@@ -166,11 +169,11 @@ def _node_snapshot(node: GraphNode) -> NodeSnapshot:
     )
 
 
-def _edge_snapshot(edge: GraphEdge) -> BaseEdge | ConnectEdge:
-    if edge.role == "base":
+def _edge_snapshot(edge: GraphEdge) -> SubjectEdge | ConnectEdge:
+    if edge.role == "subject":
         if edge.pinned_version_id is None:
-            raise RunSubmissionError("Base edge has no pinned version")
-        return BaseEdge(
+            raise RunSubmissionError("Subject edge has no pinned version")
+        return SubjectEdge(
             id=str(edge.id),
             source_node_id=str(edge.source_node_id),
             target_node_id=str(edge.target_node_id),
@@ -198,4 +201,13 @@ def _setting_integer(settings: dict[str, object], key: str) -> int:
     value = settings.get(key)
     if not isinstance(value, int) or isinstance(value, bool):
         raise RunSubmissionError(f"Node setting {key} must be an integer")
+    return value
+
+
+def _setting_boolean(
+    settings: dict[str, object], key: str, *, default: bool | None = None
+) -> bool:
+    value = settings.get(key, default)
+    if not isinstance(value, bool):
+        raise RunSubmissionError(f"Node setting {key} must be a boolean")
     return value

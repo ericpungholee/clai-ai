@@ -13,7 +13,7 @@ class Op(StrEnum):
 
 
 class EdgeRole(StrEnum):
-    BASE = "base"
+    SUBJECT = "subject"
     CONNECT = "connect"
 
 
@@ -32,12 +32,12 @@ type Pin = VersionPin | ActivePin
 
 
 @dataclass(frozen=True)
-class BaseEdge:
+class SubjectEdge:
     id: str
     source_node_id: str
     target_node_id: str
     pin: VersionPin
-    role: Literal[EdgeRole.BASE] = field(default=EdgeRole.BASE, init=False)
+    role: Literal[EdgeRole.SUBJECT] = field(default=EdgeRole.SUBJECT, init=False)
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,7 @@ class ConnectEdge:
     role: Literal[EdgeRole.CONNECT] = field(default=EdgeRole.CONNECT, init=False)
 
 
-type RunEdge = BaseEdge | ConnectEdge
+type RunEdge = SubjectEdge | ConnectEdge
 
 
 @dataclass(frozen=True)
@@ -58,7 +58,7 @@ class MaskSnapshot:
     rle: str
     width: int
     height: int
-    base_version_id: str
+    subject_version_id: str
 
     def __post_init__(self) -> None:
         if not self.rle:
@@ -72,6 +72,7 @@ class NodeSettings:
     aspect_ratio: str = "1:1"
     width: int = 1024
     height: int = 1024
+    white_background: bool = True
 
     def __post_init__(self) -> None:
         if not self.aspect_ratio.strip():
@@ -106,7 +107,7 @@ class VersionSnapshot:
 @dataclass(frozen=True)
 class ResolvedInputs:
     node: NodeSnapshot
-    base: VersionSnapshot | None
+    subject: VersionSnapshot | None
     connects: tuple[VersionSnapshot, ...]
     mask: MaskSnapshot | None
     seed: int
@@ -114,7 +115,7 @@ class ResolvedInputs:
 
 @dataclass(frozen=True)
 class InputSnapshot:
-    base_version_id: str | None
+    subject_version_id: str | None
     connect_version_ids: tuple[str, ...]
     mask_hash: str | None
 
@@ -126,7 +127,7 @@ class FrozenRunRequest:
     prompt_at_runtime: str
     seed: int
     settings: NodeSettings
-    base: VersionSnapshot | None
+    subject: VersionSnapshot | None
     connects: tuple[VersionSnapshot, ...]
     mask: MaskSnapshot | None
     input_snapshot: InputSnapshot

@@ -95,11 +95,18 @@ def insert_node(connection: object, project_id: uuid.UUID) -> uuid.UUID:
 
 
 def insert_version(
-    connection: object, project_id: uuid.UUID, node_id: uuid.UUID
+    connection: object,
+    project_id: uuid.UUID,
+    node_id: uuid.UUID,
+    *,
+    input_snapshot: dict[str, object] | None = None,
+    frozen_request: dict[str, object] | None = None,
+    params: dict[str, object] | None = None,
+    prompt_at_runtime: str = "shoe",
 ) -> uuid.UUID:
     job_id = uuid.uuid4()
     version_id = uuid.uuid4()
-    frozen = json.dumps({"node_id": str(node_id), "op": "generate"})
+    frozen = json.dumps(frozen_request or {"node_id": str(node_id), "op": "generate"})
     connection.execute(
         text(
             """
@@ -131,8 +138,8 @@ def insert_version(
             ) VALUES (
                 :id, :node_id, :job_id, 'https://cdn.test/shoe.png',
                 'shoe.png', :digest, 'image/png', 'generate', 'fake',
-                'fixture-v1', 'fake/generate', CAST('{}' AS jsonb),
-                CAST('{}' AS jsonb), 42, CAST(:snapshot AS jsonb), 'shoe', 0
+                'fixture-v1', 'fake/generate', CAST(:params AS jsonb),
+                CAST('{}' AS jsonb), 42, CAST(:snapshot AS jsonb), :prompt, 0
             )
             """
         ),
@@ -141,13 +148,16 @@ def insert_version(
             "node_id": node_id,
             "job_id": job_id,
             "digest": "a" * 64,
+            "params": json.dumps(params or {}),
             "snapshot": json.dumps(
-                {
-                    "base_version_id": None,
+                input_snapshot
+                or {
+                    "subject_version_id": None,
                     "connect_version_ids": [],
                     "mask_hash": None,
                 }
             ),
+            "prompt": prompt_at_runtime,
         },
     )
     return version_id
@@ -208,6 +218,174 @@ def test_legacy_placeholder_rows_are_reset_but_projects_survive(
         assert connection.scalar(text("SELECT count(*) FROM graph_edges")) == 0
 
 
+def test_subject_migration_renames_data_and_restores_version_trigger(
+    postgres_engine: Engine,
+) -> None:
+    migrate(postgres_engine, "b7a4f0c9d2e1")
+    old_prompt = "historical prompt must remain byte-for-byte"
+    old_params = {"fixture": "unchanged", "seed": 42}
+    with postgres_engine.begin() as connection:
+        project_id = insert_project(connection)
+        source_id = insert_node(connection, project_id)
+        target_id = insert_node(connection, project_id)
+        frozen_request = {
+            "node_id": str(target_id),
+            "op": "edit_inpaint",
+            "prompt_at_runtime": old_prompt,
+            "seed": 42,
+            "settings": {"aspect_ratio": "1:1", "width": 1024, "height": 1024},
+            "base": None,
+            "connects": [],
+            "mask": None,
+            "input_snapshot": {
+                "base_version_id": None,
+                "connect_version_ids": [],
+                "mask_hash": None,
+            },
+            "edit_depth": 0,
+        }
+        version_id = insert_version(
+            connection,
+            project_id,
+            source_id,
+            input_snapshot={
+                "base_version_id": None,
+                "connect_version_ids": [],
+                "mask_hash": None,
+            },
+            frozen_request=frozen_request,
+            params=old_params,
+            prompt_at_runtime=old_prompt,
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO graph_edges (
+                    id, project_id, source_node_id, target_node_id,
+                    role, pin_mode, pinned_version_id
+                ) VALUES (
+                    :id, :project_id, :source, :target,
+                    'base', 'version', :version
+                )
+                """
+            ),
+            {
+                "id": uuid.uuid4(),
+                "project_id": project_id,
+                "source": source_id,
+                "target": target_id,
+                "version": version_id,
+            },
+        )
+        connection.execute(
+            text(
+                "UPDATE graph_nodes SET mask_rle = 'rle', mask_width = 1, "
+                "mask_height = 1, mask_base_version_id = :version WHERE id = :target"
+            ),
+            {"version": version_id, "target": target_id},
+        )
+
+    migrate(postgres_engine)
+
+    with postgres_engine.connect() as connection:
+        edge_role = connection.scalar(
+            text("SELECT role FROM graph_edges WHERE target_node_id = :target"),
+            {"target": target_id},
+        )
+        migrated_version = (
+            connection.execute(
+                text(
+                    "SELECT input_snapshot, params, prompt_at_runtime "
+                    "FROM versions WHERE id = :id"
+                ),
+                {"id": version_id},
+            )
+            .mappings()
+            .one()
+        )
+        migrated_job = connection.scalar(
+            text("SELECT frozen_request FROM run_jobs WHERE node_id = :node"),
+            {"node": source_id},
+        )
+        assert edge_role == "subject"
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT mask_subject_version_id FROM graph_nodes WHERE id = :target"
+                ),
+                {"target": target_id},
+            )
+            == version_id
+        )
+        assert migrated_version["input_snapshot"] == {
+            "subject_version_id": None,
+            "connect_version_ids": [],
+            "mask_hash": None,
+        }
+        assert migrated_version["params"] == old_params
+        assert migrated_version["prompt_at_runtime"] == old_prompt
+        assert migrated_job["subject"] is None
+        assert "base" not in migrated_job
+        assert migrated_job["input_snapshot"]["subject_version_id"] is None
+        assert "base_version_id" not in migrated_job["input_snapshot"]
+        assert (
+            connection.scalar(
+                text("SELECT count(*) FROM graph_edges WHERE role = 'base'")
+            )
+            == 0
+        )
+        assert (
+            connection.scalar(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM pg_constraint constraint_row
+                    WHERE constraint_row.conrelid = 'graph_edges'::regclass
+                      AND pg_get_constraintdef(constraint_row.oid) LIKE '%base%'
+                    """
+                )
+            )
+            == 0
+        )
+        assert (
+            connection.scalar(
+                text(
+                    """
+                SELECT count(*)
+                FROM pg_index index_row
+                WHERE index_row.indrelid = 'graph_edges'::regclass
+                  AND coalesce(
+                      pg_get_expr(index_row.indpred, index_row.indrelid), ''
+                  ) LIKE '%base%'
+                """
+                )
+            )
+            == 0
+        )
+        assert (
+            connection.scalar(
+                text(
+                    """
+                SELECT tgenabled
+                FROM pg_trigger
+                WHERE tgrelid = 'versions'::regclass
+                  AND tgname = 'versions_insert_only'
+                """
+                )
+            )
+            == "O"
+        )
+
+    with pytest.raises(DBAPIError, match="versions are insert-only"):
+        with postgres_engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE versions SET prompt_at_runtime = 'changed' WHERE id = :id"
+                ),
+                {"id": version_id},
+            )
+
+
 def test_version_trigger_rejects_updates_and_deletes(
     postgres_engine: Engine,
 ) -> None:
@@ -244,7 +422,7 @@ def test_role_pin_constraint_rejects_invalid_pair(
                         id, project_id, source_node_id, target_node_id,
                         role, pin_mode
                     ) VALUES (
-                        :id, :project_id, :source, :target, 'base', 'active'
+                        :id, :project_id, :source, :target, 'subject', 'active'
                     )
                     """
                 ),
@@ -257,7 +435,7 @@ def test_role_pin_constraint_rejects_invalid_pair(
             )
 
 
-def test_partial_unique_index_rejects_second_base(
+def test_partial_unique_index_rejects_second_subject(
     postgres_engine: Engine,
 ) -> None:
     migrate(postgres_engine)
@@ -275,7 +453,8 @@ def test_partial_unique_index_rejects_second_base(
                     id, project_id, source_node_id, target_node_id, role,
                     pin_mode, pinned_version_id
                 ) VALUES (
-                    :id, :project_id, :source, :target, 'base', 'version', :version
+                    :id, :project_id, :source, :target,
+                    'subject', 'version', :version
                 )
                 """
             ),
@@ -288,7 +467,7 @@ def test_partial_unique_index_rejects_second_base(
             },
         )
 
-    with pytest.raises(DBAPIError, match="uq_graph_edges_one_base_per_target"):
+    with pytest.raises(DBAPIError, match="uq_graph_edges_one_subject_per_target"):
         with postgres_engine.begin() as connection:
             connection.execute(
                 text(
@@ -298,7 +477,7 @@ def test_partial_unique_index_rejects_second_base(
                         pin_mode, pinned_version_id
                     ) VALUES (
                         :id, :project_id, :source, :target,
-                        'base', 'version', :version
+                        'subject', 'version', :version
                     )
                     """
                 ),
@@ -429,7 +608,7 @@ def test_navy_shoe_path_runs_end_to_end_on_postgres_with_fake_provider(
                 json={"idempotency_key": "postgres-shoe-generate"},
             )
             assert generate.status_code == 202
-            base_version_id = execute_run_job(
+            subject_version_id = execute_run_job(
                 job_id=enqueuer.job_ids[-1],
                 session_factory=postgres_sessions,
                 provider=provider,
@@ -445,10 +624,10 @@ def test_navy_shoe_path_runs_end_to_end_on_postgres_with_fake_provider(
                 },
             ).json()
             wire = client.put(
-                f"/api/projects/{project['id']}/nodes/{branch['id']}/base",
+                f"/api/projects/{project['id']}/nodes/{branch['id']}/subject",
                 json={
                     "source_node_id": shoe["id"],
-                    "version_id": str(base_version_id),
+                    "version_id": str(subject_version_id),
                 },
             )
             assert wire.status_code == 200
@@ -470,7 +649,7 @@ def test_navy_shoe_path_runs_end_to_end_on_postgres_with_fake_provider(
         assert target["active_version_id"] == str(navy_version_id)
         assert target["versions"][0]["op"] == "edit_instruct"
         assert target["versions"][0]["artifact_url"].endswith("same-shoe-navy.png")
-        assert provider.requests[-1].base is not None
-        assert provider.requests[-1].base.id == str(base_version_id)
+        assert provider.requests[-1].subject is not None
+        assert provider.requests[-1].subject.id == str(subject_version_id)
     finally:
         app.dependency_overrides.clear()

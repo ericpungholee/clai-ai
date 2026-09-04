@@ -180,9 +180,9 @@ class NanoBananaProProvider:
 
 
 def _input_versions(request: FrozenRunRequest) -> tuple[VersionSnapshot, ...]:
-    if request.base is None:
+    if request.subject is None:
         return request.connects
-    return (request.base, *request.connects)
+    return (request.subject, *request.connects)
 
 
 def _resolution_label(*, width: int, height: int) -> str:

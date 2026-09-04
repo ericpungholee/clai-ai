@@ -12,6 +12,7 @@ export type NodeSettings = {
   aspect_ratio: string;
   width: number;
   height: number;
+  whiteBackground: boolean;
 };
 
 export type Version = {
@@ -26,7 +27,7 @@ export type Version = {
   params: Record<string, unknown>;
   seed: number;
   input_snapshot: {
-    base_version_id: string | null;
+    subject_version_id: string | null;
     connect_version_ids: string[];
     mask_hash: string | null;
   };
@@ -52,7 +53,7 @@ export type PersistedGraphEdge = {
   id: string;
   source_node_id: string;
   target_node_id: string;
-  role: "base" | "connect";
+  role: "subject" | "connect";
   pin: VersionPin | ActivePin;
   order: number | null;
 };
@@ -62,7 +63,7 @@ export type GraphDocument = {
   edges: PersistedGraphEdge[];
 };
 
-export type BasePreview = {
+export type SubjectPreview = {
   nodeTitle: string;
   versionId: string;
   artifactUrl: string;
@@ -75,19 +76,19 @@ export type DesignNodeData = {
   seed: number | null;
   activeVersionId: string | null;
   versions: Version[];
-  base: BasePreview | null;
+  subject: SubjectPreview | null;
   resolvedOp: Op;
   runState: "idle" | "running" | "failed";
   runError: string | null;
 } & Record<string, unknown>;
 
-export type BaseEdgeData = {
-  role: "base";
+export type SubjectEdgeData = {
+  role: "subject";
   pin: VersionPin;
 } & Record<string, unknown>;
 
 export type WorkspaceNode = Node<DesignNodeData, "design">;
-export type WorkspaceEdge = Edge<BaseEdgeData>;
+export type WorkspaceEdge = Edge<SubjectEdgeData>;
 
 export type RunJob = {
   id: string;
@@ -161,13 +162,13 @@ export async function deleteDesignNode(
   );
 }
 
-export async function replaceBaseEdge(
+export async function replaceSubjectEdge(
   projectId: string,
   targetNodeId: string,
   input: { source_node_id: string; version_id: string },
 ): Promise<PersistedGraphEdge> {
   return apiRequest(
-    `${browserApiUrl}/api/projects/${projectId}/nodes/${targetNodeId}/base`,
+    `${browserApiUrl}/api/projects/${projectId}/nodes/${targetNodeId}/subject`,
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -176,12 +177,12 @@ export async function replaceBaseEdge(
   );
 }
 
-export async function deleteBaseEdge(
+export async function deleteSubjectEdge(
   projectId: string,
   targetNodeId: string,
 ): Promise<void> {
   await apiRequest(
-    `${browserApiUrl}/api/projects/${projectId}/nodes/${targetNodeId}/base`,
+    `${browserApiUrl}/api/projects/${projectId}/nodes/${targetNodeId}/subject`,
     { method: "DELETE" },
   );
 }
@@ -234,18 +235,18 @@ export function toWorkspaceGraph(graph: GraphDocument): {
   edges: WorkspaceEdge[];
 } {
   const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
-  const baseByTarget = new Map(
+  const subjectByTarget = new Map(
     graph.edges
       .filter(
         (edge): edge is PersistedGraphEdge & { pin: VersionPin } =>
-          edge.role === "base" && edge.pin.mode === "version",
+          edge.role === "subject" && edge.pin.mode === "version",
       )
       .map((edge) => [edge.target_node_id, edge]),
   );
 
   return {
     nodes: graph.nodes.map((node) => {
-      const edge = baseByTarget.get(node.id);
+      const edge = subjectByTarget.get(node.id);
       const source = edge ? nodesById.get(edge.source_node_id) : undefined;
       const pinned =
         edge && source
@@ -253,7 +254,7 @@ export function toWorkspaceGraph(graph: GraphDocument): {
               (version) => version.id === edge.pin.version_id,
             )
           : undefined;
-      const base =
+      const subject =
         edge && source && pinned
           ? {
               nodeTitle: source.title,
@@ -272,9 +273,9 @@ export function toWorkspaceGraph(graph: GraphDocument): {
           seed: node.seed,
           activeVersionId: node.active_version_id,
           versions: node.versions,
-          base,
+          subject,
           resolvedOp: resolveOp({
-            hasBase: base !== null,
+            hasSubject: subject !== null,
             hasMask: false,
             connectCount: 0,
           }),
@@ -286,7 +287,7 @@ export function toWorkspaceGraph(graph: GraphDocument): {
     edges: graph.edges
       .filter(
         (edge): edge is PersistedGraphEdge & { pin: VersionPin } =>
-          edge.role === "base" && edge.pin.mode === "version",
+          edge.role === "subject" && edge.pin.mode === "version",
       )
       .map((edge) => toWorkspaceEdge(edge)),
   };
@@ -300,24 +301,24 @@ export function toWorkspaceEdge(
     source: edge.source_node_id,
     target: edge.target_node_id,
     sourceHandle: "source",
-    targetHandle: "base",
-    data: { role: "base", pin: edge.pin },
+    targetHandle: "subject",
+    data: { role: "subject", pin: edge.pin },
   };
 }
 
 export function resolveOp(input: {
-  hasBase: boolean;
+  hasSubject: boolean;
   hasMask: boolean;
   connectCount: number;
 }): Op {
   if (input.connectCount < 0 || input.connectCount > 2) {
     throw new Error("A run accepts between zero and two connects");
   }
-  if (input.hasMask && !input.hasBase) {
-    throw new Error("A mask requires a base");
+  if (input.hasMask && !input.hasSubject) {
+    throw new Error("A mask requires a subject");
   }
-  if (!input.hasBase && input.connectCount === 0) return "generate";
-  if (!input.hasBase) return "generate_ref";
+  if (!input.hasSubject && input.connectCount === 0) return "generate";
+  if (!input.hasSubject) return "generate_ref";
   if (input.hasMask && input.connectCount === 0) return "edit_inpaint";
   if (input.hasMask) return "edit_composite";
   if (input.connectCount > 0) return "edit_ref_guided";

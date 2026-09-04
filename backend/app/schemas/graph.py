@@ -18,6 +18,7 @@ class NodeSettingsData(BaseModel):
     aspect_ratio: str = Field(default="1:1", min_length=1, max_length=16)
     width: int = Field(default=1024, ge=1, le=4096)
     height: int = Field(default=1024, ge=1, le=4096)
+    whiteBackground: bool = True
 
 
 class VersionData(BaseModel):
@@ -63,7 +64,7 @@ class GraphEdgeData(BaseModel):
     id: uuid.UUID
     source_node_id: uuid.UUID
     target_node_id: uuid.UUID
-    role: Literal["base", "connect"]
+    role: Literal["subject", "connect"]
     pin: PinData
     order: int | None = None
 
@@ -91,7 +92,7 @@ class NodeUpdate(BaseModel):
     position: GraphPosition | None = None
 
 
-class BaseEdgeReplace(BaseModel):
+class SubjectEdgeReplace(BaseModel):
     source_node_id: uuid.UUID
     version_id: uuid.UUID
 

@@ -20,12 +20,13 @@ def encode_frozen_request(request: FrozenRunRequest) -> dict[str, object]:
             "aspect_ratio": request.settings.aspect_ratio,
             "width": request.settings.width,
             "height": request.settings.height,
+            "whiteBackground": request.settings.white_background,
         },
-        "base": _encode_version(request.base) if request.base else None,
+        "subject": _encode_version(request.subject) if request.subject else None,
         "connects": [_encode_version(version) for version in request.connects],
         "mask": _encode_mask(request.mask) if request.mask else None,
         "input_snapshot": {
-            "base_version_id": request.input_snapshot.base_version_id,
+            "subject_version_id": request.input_snapshot.subject_version_id,
             "connect_version_ids": list(request.input_snapshot.connect_version_ids),
             "mask_hash": request.input_snapshot.mask_hash,
         },
@@ -34,10 +35,16 @@ def encode_frozen_request(request: FrozenRunRequest) -> dict[str, object]:
 
 
 def decode_frozen_request(payload: Mapping[str, object]) -> FrozenRunRequest:
+    if "base" in payload:
+        raise ValueError("Frozen requests must use subject vocabulary")
     settings = _mapping(payload, "settings")
     snapshot = _mapping(payload, "input_snapshot")
-    base_value = payload.get("base")
+    if "base_version_id" in snapshot:
+        raise ValueError("Frozen input snapshots must use subject vocabulary")
+    subject_value = payload.get("subject")
     mask_value = payload.get("mask")
+    if isinstance(mask_value, dict) and "base_version_id" in mask_value:
+        raise ValueError("Frozen masks must use subject vocabulary")
     connect_values = payload.get("connects")
     if not isinstance(connect_values, list):
         raise ValueError("Frozen request connects must be a list")
@@ -56,10 +63,11 @@ def decode_frozen_request(payload: Mapping[str, object]) -> FrozenRunRequest:
             aspect_ratio=_string(settings, "aspect_ratio"),
             width=_integer(settings, "width"),
             height=_integer(settings, "height"),
+            white_background=_boolean(settings, "whiteBackground", default=False),
         ),
-        base=(
-            _decode_version(_as_mapping(base_value, "base"))
-            if base_value is not None
+        subject=(
+            _decode_version(_as_mapping(subject_value, "subject"))
+            if subject_value is not None
             else None
         ),
         connects=tuple(
@@ -71,7 +79,7 @@ def decode_frozen_request(payload: Mapping[str, object]) -> FrozenRunRequest:
             else None
         ),
         input_snapshot=InputSnapshot(
-            base_version_id=_optional_string(snapshot, "base_version_id"),
+            subject_version_id=_optional_string(snapshot, "subject_version_id"),
             connect_version_ids=tuple(connect_ids),
             mask_hash=_optional_string(snapshot, "mask_hash"),
         ),
@@ -104,7 +112,7 @@ def _encode_mask(mask: MaskSnapshot) -> dict[str, object]:
         "rle": mask.rle,
         "width": mask.width,
         "height": mask.height,
-        "base_version_id": mask.base_version_id,
+        "subject_version_id": mask.subject_version_id,
     }
 
 
@@ -113,7 +121,7 @@ def _decode_mask(payload: Mapping[str, object]) -> MaskSnapshot:
         rle=_string(payload, "rle"),
         width=_integer(payload, "width"),
         height=_integer(payload, "height"),
-        base_version_id=_string(payload, "base_version_id"),
+        subject_version_id=_string(payload, "subject_version_id"),
     )
 
 
@@ -145,4 +153,13 @@ def _integer(payload: Mapping[str, object], key: str) -> int:
     value = payload.get(key)
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError(f"Frozen request {key} must be an integer")
+    return value
+
+
+def _boolean(
+    payload: Mapping[str, object], key: str, *, default: bool | None = None
+) -> bool:
+    value = payload.get(key, default)
+    if not isinstance(value, bool):
+        raise ValueError(f"Frozen request {key} must be a boolean")
     return value

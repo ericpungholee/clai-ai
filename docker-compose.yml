@@ -63,7 +63,7 @@ services:
       - ./backend:/app
       - backend_venv:/app/.venv
     command: >
-      sh -c "uv sync && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c "uv sync && uv run alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,6 +102,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      backend:
         condition: service_healthy
     restart: unless-stopped
     stop_grace_period: 20s

@@ -64,7 +64,7 @@ def execute_run_job(
         artifact = ingestor.ingest(result)
         metric = (
             scorer.score(request=request, artifact=artifact)
-            if request.base is not None
+            if request.subject is not None
             else ChangeMagnitudeResult(method="dinov2_cosine", status="pending")
         )
         return _commit_version(
@@ -173,11 +173,14 @@ def _commit_version(
             provider=provider_job.provider,
             model=provider_job.model,
             endpoint=provider_job.endpoint,
-            params=provider_job.request_payload,
+            params={
+                **provider_job.request_payload,
+                "whiteBackground": request.settings.white_background,
+            },
             provider_response_metadata=response_metadata,
             seed=request.seed,
             input_snapshot={
-                "base_version_id": request.input_snapshot.base_version_id,
+                "subject_version_id": request.input_snapshot.subject_version_id,
                 "connect_version_ids": list(request.input_snapshot.connect_version_ids),
                 "mask_hash": request.input_snapshot.mask_hash,
             },
@@ -187,7 +190,7 @@ def _commit_version(
         db.add(version)
         db.flush()
         node.active_version_id = version.id
-        if request.base is not None:
+        if request.subject is not None:
             db.add(
                 VersionMetric(
                     version_id=version.id,

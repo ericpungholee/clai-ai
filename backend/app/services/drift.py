@@ -31,19 +31,19 @@ class CommandDinoV2Scorer:
     def score(
         self, *, request: FrozenRunRequest, artifact: StoredArtifact
     ) -> ChangeMagnitudeResult:
-        if request.base is None:
+        if request.subject is None:
             return ChangeMagnitudeResult(method="dinov2_cosine", status="pending")
         try:
-            base = self._artifact_reader.read(request.base.artifact_url)
+            subject = self._artifact_reader.read(request.subject.artifact_url)
             output = self._artifact_reader.read(artifact.artifact_url)
             with tempfile.TemporaryDirectory(prefix="clai-drift-") as directory:
                 root = Path(directory)
-                base_path = root / base.filename
+                subject_path = root / subject.filename
                 output_path = root / output.filename
-                base_path.write_bytes(base.content)
+                subject_path.write_bytes(subject.content)
                 output_path.write_bytes(output.content)
                 completed = subprocess.run(
-                    [*self._command, str(base_path), str(output_path)],
+                    [*self._command, str(subject_path), str(output_path)],
                     check=True,
                     capture_output=True,
                     text=True,

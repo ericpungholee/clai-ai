@@ -1,11 +1,11 @@
 # Clai
 
-Clai is a node-based canvas for concepting physical products with AI. Wiring an immutable image version into another node as its base changes the next run from generation to an identity-preserving edit.
+Clai is a node-based canvas for concepting physical products with AI. Wiring an immutable image version into another node as its subject changes the next run from generation to an identity-preserving edit.
 
 ## P0 functionality
 
-- Unified design nodes with prompts, active artifacts, pinned-base thumbnails, version strips, and pre-run operation chips.
-- Base wires pin a specific immutable version. A second base wire replaces the first atomically.
+- Unified design nodes with prompts, active artifacts, subject thumbnails, and version strips.
+- Subject wires pin a specific immutable version. A second subject wire replaces the first atomically.
 - Branch creation from any historical version.
 - Pure input resolution, operation routing, preservation-prompt construction, seed inheritance, and request freezing before enqueue.
 - Durable database-backed run jobs transported by Celery.
@@ -21,7 +21,7 @@ Clai is a node-based canvas for concepting physical products with AI. Wiring an 
 
 ## Architecture
 
-React Flow owns immediate pan, zoom, selection, and drag state. Scoped FastAPI mutations persist nodes and pinned base edges without rewriting the graph. Run submission resolves and freezes the graph synchronously into `run_jobs`; workers dispatch only that frozen request and never re-resolve live wiring. Provider output is copied into Clai storage before a transaction appends the version and advances the node's active version.
+React Flow owns immediate pan, zoom, selection, and drag state. Scoped FastAPI mutations persist nodes and pinned subject edges without rewriting the graph. Run submission resolves and freezes the graph synchronously into `run_jobs`; workers dispatch only that frozen request and never re-resolve live wiring. Provider output is copied into Clai storage before a transaction appends the version and advances the node's active version.
 
 ```text
 React Flow → scoped FastAPI mutations → PostgreSQL
@@ -80,4 +80,4 @@ make db-shell
 `GET /health` checks the API process. `GET /health/ready` verifies PostgreSQL
 and Redis connectivity. PostgreSQL data persists across `make down`.
 
-The PostgreSQL suite uses a disposable test service and validates the version-mutation trigger, role/pin constraint, one-base partial index, graph reset migration, concurrent two-connect cap, and full fake-provider navy-shoe path. Automated tests never call fal.
+The PostgreSQL suite uses a disposable test service and validates the version-mutation trigger, role/pin constraint, one-subject partial index, graph reset and subject-rename migrations, concurrent two-connect cap, and full fake-provider navy-shoe path. Automated tests never call fal.

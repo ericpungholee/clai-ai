@@ -1,6 +1,5 @@
 from app.domain.runs import (
     ActivePin,
-    BaseEdge,
     ConnectEdge,
     EdgeRole,
     FrozenRunRequest,
@@ -10,13 +9,13 @@ from app.domain.runs import (
     NodeSnapshot,
     Op,
     ResolvedInputs,
+    SubjectEdge,
     VersionPin,
     VersionSnapshot,
 )
 
 __all__ = [
     "ActivePin",
-    "BaseEdge",
     "ConnectEdge",
     "EdgeRole",
     "FrozenRunRequest",
@@ -26,6 +25,7 @@ __all__ = [
     "NodeSnapshot",
     "Op",
     "ResolvedInputs",
+    "SubjectEdge",
     "VersionPin",
     "VersionSnapshot",
 ]

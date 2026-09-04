@@ -21,7 +21,8 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
 
   try {
     graph = await getGraph(id);
-  } catch {
+  } catch (error) {
+    console.error(`Failed to load graph for project ${id}`, error);
     return (
       <div className="flex h-dvh min-h-0 flex-col bg-white">
         <header className="grid h-14 shrink-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center border-b border-border px-4 sm:px-6">

@@ -40,15 +40,16 @@ class GraphNode(Base):
             use_alter=True,
         ),
         ForeignKeyConstraint(
-            ["mask_base_version_id"],
+            ["mask_subject_version_id"],
             ["versions.id"],
-            name="fk_graph_nodes_mask_base_version",
+            name="fk_graph_nodes_mask_subject_version",
             ondelete="RESTRICT",
             use_alter=True,
         ),
         CheckConstraint(
             "mask_rle IS NULL OR "
-            "(mask_width > 0 AND mask_height > 0 AND mask_base_version_id IS NOT NULL)",
+            "(mask_width > 0 AND mask_height > 0 "
+            "AND mask_subject_version_id IS NOT NULL)",
             name="ck_graph_nodes_mask_complete",
         ),
     )
@@ -65,13 +66,18 @@ class GraphNode(Base):
     prompt: Mapped[str] = mapped_column(Text, default="")
     settings: Mapped[dict[str, object]] = mapped_column(
         json_type,
-        default=lambda: {"aspect_ratio": "1:1", "width": 1024, "height": 1024},
+        default=lambda: {
+            "aspect_ratio": "1:1",
+            "width": 1024,
+            "height": 1024,
+            "whiteBackground": True,
+        },
     )
     seed: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     mask_rle: Mapped[str | None] = mapped_column(Text, nullable=True)
     mask_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     mask_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    mask_base_version_id: Mapped[uuid.UUID | None] = mapped_column(
+    mask_subject_version_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), nullable=True
     )
     active_version_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -161,7 +167,7 @@ class GraphEdge(Base):
             ondelete="RESTRICT",
         ),
         CheckConstraint(
-            "(role = 'base' AND pin_mode = 'version' "
+            "(role = 'subject' AND pin_mode = 'version' "
             "AND pinned_version_id IS NOT NULL AND connect_order IS NULL) OR "
             "(role = 'connect' AND pin_mode = 'active' "
             "AND pinned_version_id IS NULL AND connect_order IS NOT NULL "
@@ -174,11 +180,11 @@ class GraphEdge(Base):
             name="uq_graph_edges_target_connect_order",
         ),
         Index(
-            "uq_graph_edges_one_base_per_target",
+            "uq_graph_edges_one_subject_per_target",
             "target_node_id",
             unique=True,
-            postgresql_where=text("role = 'base'"),
-            sqlite_where=text("role = 'base'"),
+            postgresql_where=text("role = 'subject'"),
+            sqlite_where=text("role = 'subject'"),
         ),
     )
 

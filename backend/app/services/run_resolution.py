@@ -1,11 +1,11 @@
 from collections.abc import Callable, Mapping, Sequence
 
 from app.domain.runs import (
-    BaseEdge,
     ConnectEdge,
     NodeSnapshot,
     ResolvedInputs,
     RunEdge,
+    SubjectEdge,
     VersionSnapshot,
 )
 
@@ -25,47 +25,49 @@ def resolve_inputs(
     if any(edge.target_node_id != target.id for edge in inbound_edges):
         raise RunResolutionError("Every supplied edge must target the run node")
 
-    base_edges = [edge for edge in inbound_edges if isinstance(edge, BaseEdge)]
+    subject_edges = [edge for edge in inbound_edges if isinstance(edge, SubjectEdge)]
     connect_edges = [edge for edge in inbound_edges if isinstance(edge, ConnectEdge)]
 
-    if len(base_edges) > 1:
-        raise RunResolutionError("A node accepts at most one base edge")
+    if len(subject_edges) > 1:
+        raise RunResolutionError("A node accepts at most one subject edge")
     if len(connect_edges) > 2:
         raise RunResolutionError("A node accepts at most two connect edges")
 
-    base = _resolve_base(base_edges[0], versions) if base_edges else None
+    subject = _resolve_subject(subject_edges[0], versions) if subject_edges else None
     connects = _resolve_connects(connect_edges, nodes, versions)
 
     if target.mask is not None:
-        if base is None:
-            raise RunResolutionError("A mask requires a resolved base version")
-        if target.mask.base_version_id != base.id:
-            raise RunResolutionError("The mask is stale for the resolved base version")
+        if subject is None:
+            raise RunResolutionError("A mask requires a resolved subject version")
+        if target.mask.subject_version_id != subject.id:
+            raise RunResolutionError(
+                "The mask is stale for the resolved subject version"
+            )
 
     seed = target.seed
-    if seed is None and base is not None:
-        seed = base.seed
+    if seed is None and subject is not None:
+        seed = subject.seed
     if seed is None:
         seed = random_seed()
 
     return ResolvedInputs(
         node=target,
-        base=base,
+        subject=subject,
         connects=connects,
         mask=target.mask,
         seed=seed,
     )
 
 
-def _resolve_base(
-    edge: BaseEdge,
+def _resolve_subject(
+    edge: SubjectEdge,
     versions: Mapping[str, VersionSnapshot],
 ) -> VersionSnapshot:
     version = versions.get(edge.pin.version_id)
     if version is None:
-        raise RunResolutionError("The base edge points to a missing version")
+        raise RunResolutionError("The subject edge points to a missing version")
     if version.node_id != edge.source_node_id:
-        raise RunResolutionError("The pinned base version belongs to another node")
+        raise RunResolutionError("The pinned subject version belongs to another node")
     return version
 
 

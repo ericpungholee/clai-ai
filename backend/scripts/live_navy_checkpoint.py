@@ -94,8 +94,8 @@ def main() -> None:
     secrets = CheckpointSecrets(_env_file=root / ".env")
     output_root.mkdir(parents=True, exist_ok=True)
     fixture_url = "clai-fixture://shoe-03/input.jpg"
-    base = VersionSnapshot(
-        id="p0-shoe-03-base",
+    subject = VersionSnapshot(
+        id="p0-shoe-03-subject",
         node_id="p0-shoe-03-source",
         artifact_url=fixture_url,
         seed=3329142776,
@@ -111,13 +111,13 @@ def main() -> None:
             "Change only: make it navy\n"
             "Do not restyle or reinterpret any other element."
         ),
-        seed=base.seed,
+        seed=subject.seed,
         settings=NodeSettings(aspect_ratio="auto", width=1024, height=1024),
-        base=base,
+        subject=subject,
         connects=(),
         mask=None,
         input_snapshot=InputSnapshot(
-            base_version_id=base.id,
+            subject_version_id=subject.id,
             connect_version_ids=(),
             mask_hash=None,
         ),

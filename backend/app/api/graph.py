@@ -10,7 +10,6 @@ from app.core.database import get_db
 from app.models.graph import GraphEdge, GraphNode, RunJob, Version
 from app.models.project import Project
 from app.schemas.graph import (
-    BaseEdgeReplace,
     BranchCreate,
     BranchData,
     GraphDocument,
@@ -21,13 +20,14 @@ from app.schemas.graph import (
     RunJobData,
     RunPreviewData,
     RunSubmit,
+    SubjectEdgeReplace,
 )
 from app.services.graph_service import (
     GraphMutationError,
     create_branch,
     create_node,
     read_graph_document,
-    replace_base_edge,
+    replace_subject_edge,
     serialize_edge,
     serialize_node,
     update_node,
@@ -110,16 +110,18 @@ def patch_node(
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
-@router.put("/{project_id}/nodes/{target_node_id}/base", response_model=GraphEdgeData)
-def put_base_edge(
+@router.put(
+    "/{project_id}/nodes/{target_node_id}/subject", response_model=GraphEdgeData
+)
+def put_subject_edge(
     project_id: uuid.UUID,
     target_node_id: uuid.UUID,
-    data: BaseEdgeReplace,
+    data: SubjectEdgeReplace,
     db: Session = Depends(get_db),
 ) -> GraphEdgeData:
     get_project_or_404(project_id, db)
     try:
-        edge = replace_base_edge(
+        edge = replace_subject_edge(
             project_id=project_id,
             target_node_id=target_node_id,
             data=data,
@@ -132,14 +134,14 @@ def put_base_edge(
         raise HTTPException(status_code=422, detail=str(error)) from error
     except IntegrityError as error:
         db.rollback()
-        raise HTTPException(status_code=422, detail="Invalid base edge") from error
+        raise HTTPException(status_code=422, detail="Invalid subject edge") from error
 
 
 @router.delete(
-    "/{project_id}/nodes/{target_node_id}/base",
+    "/{project_id}/nodes/{target_node_id}/subject",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-def delete_base_edge(
+def delete_subject_edge(
     project_id: uuid.UUID,
     target_node_id: uuid.UUID,
     db: Session = Depends(get_db),
@@ -149,7 +151,7 @@ def delete_base_edge(
         delete(GraphEdge).where(
             GraphEdge.project_id == project_id,
             GraphEdge.target_node_id == target_node_id,
-            GraphEdge.role == "base",
+            GraphEdge.role == "subject",
         )
     )
     db.commit()

@@ -16,7 +16,7 @@ export function NodeFrame({ children, selected, title }: NodeFrameProps) {
     >
       <Handle
         className="!h-2.5 !w-2.5 !border-2 !border-white !bg-neutral-400"
-        id="base"
+        id="subject"
         position={Position.Left}
         type="target"
       />

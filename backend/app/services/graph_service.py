@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.models.graph import GraphEdge, GraphNode, Version
 from app.schemas.graph import (
     ActivePinData,
-    BaseEdgeReplace,
     BranchCreate,
     BranchData,
     GraphDocument,
@@ -17,6 +16,7 @@ from app.schemas.graph import (
     NodeCreate,
     NodeSettingsData,
     NodeUpdate,
+    SubjectEdgeReplace,
     VersionData,
     VersionPinData,
 )
@@ -102,17 +102,17 @@ def update_node(node: GraphNode, data: NodeUpdate, db: Session) -> GraphNode:
     return node
 
 
-def replace_base_edge(
+def replace_subject_edge(
     *,
     project_id: uuid.UUID,
     target_node_id: uuid.UUID,
-    data: BaseEdgeReplace,
+    data: SubjectEdgeReplace,
     db: Session,
 ) -> GraphEdge:
     target = _lock_node(project_id, target_node_id, db)
     source = _lock_node(project_id, data.source_node_id, db)
     if target.id == source.id:
-        raise GraphMutationError("A node cannot use itself as its base")
+        raise GraphMutationError("A node cannot use itself as its subject")
     version = db.scalar(
         select(Version).where(
             Version.id == data.version_id,
@@ -120,13 +120,13 @@ def replace_base_edge(
         )
     )
     if version is None:
-        raise GraphMutationError("The selected base version does not exist")
+        raise GraphMutationError("The selected subject version does not exist")
 
     edge = db.scalar(
         select(GraphEdge)
         .where(
             GraphEdge.target_node_id == target.id,
-            GraphEdge.role == "base",
+            GraphEdge.role == "subject",
         )
         .with_for_update()
     )
@@ -135,7 +135,7 @@ def replace_base_edge(
             id=uuid.uuid4(),
             project_id=project_id,
             target_node_id=target.id,
-            role="base",
+            role="subject",
             pin_mode="version",
         )
         db.add(edge)
@@ -177,7 +177,7 @@ def create_branch(
         project_id=project_id,
         source_node_id=source.id,
         target_node_id=node.id,
-        role="base",
+        role="subject",
         pin_mode="version",
         pinned_version_id=version.id,
         connect_order=None,
@@ -192,7 +192,7 @@ def serialize_node(node: GraphNode, versions: list[Version]) -> GraphNodeData:
         id=node.id,
         title=node.title,
         prompt=node.prompt,
-        settings=NodeSettingsData.model_validate(node.settings),
+        settings=_serialize_settings(node.settings),
         seed=node.seed,
         active_version_id=node.active_version_id,
         position=GraphPosition(x=node.position_x, y=node.position_y),
@@ -219,9 +219,9 @@ def serialize_version(version: Version) -> VersionData:
 
 
 def serialize_edge(edge: GraphEdge) -> GraphEdgeData:
-    if edge.role == "base":
+    if edge.role == "subject":
         if edge.pinned_version_id is None:
-            raise GraphMutationError("A persisted base edge has no pinned version")
+            raise GraphMutationError("A persisted subject edge has no pinned version")
         pin = VersionPinData(version_id=edge.pinned_version_id)
     else:
         pin = ActivePinData()
@@ -263,3 +263,9 @@ def _validate_active_version(
     )
     if version is None:
         raise GraphMutationError("Active version must belong to the node")
+
+
+def _serialize_settings(settings: dict[str, object]) -> NodeSettingsData:
+    payload = dict(settings)
+    payload.setdefault("whiteBackground", False)
+    return NodeSettingsData.model_validate(payload)

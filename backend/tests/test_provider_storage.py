@@ -5,13 +5,13 @@ import httpx
 import pytest
 
 from app.domain.runs import (
-    BaseEdge,
     FrozenRunRequest,
     InputSnapshot,
     MaskSnapshot,
     NodeSettings,
     NodeSnapshot,
     Op,
+    SubjectEdge,
     VersionPin,
     VersionSnapshot,
 )
@@ -124,7 +124,7 @@ def version(version_id: str) -> VersionSnapshot:
 def request(
     op: Op,
     *,
-    base: VersionSnapshot | None = None,
+    subject: VersionSnapshot | None = None,
     connects: tuple[VersionSnapshot, ...] = (),
     mask: MaskSnapshot | None = None,
     settings: NodeSettings | None = None,
@@ -135,15 +135,15 @@ def request(
         prompt_at_runtime="runtime prompt",
         seed=123,
         settings=settings or NodeSettings(),
-        base=base,
+        subject=subject,
         connects=connects,
         mask=mask,
         input_snapshot=InputSnapshot(
-            base_version_id=base.id if base else None,
+            subject_version_id=subject.id if subject else None,
             connect_version_ids=tuple(item.id for item in connects),
             mask_hash="mask" if mask else None,
         ),
-        edit_depth=1 if base else 0,
+        edit_depth=1 if subject else 0,
     )
 
 
@@ -245,24 +245,24 @@ def test_sdk_transport_does_not_retry_failed_paid_submission() -> None:
     assert calls == 1
 
 
-def test_edit_uploads_clai_bytes_and_preserves_base_then_connect_order() -> None:
-    base = version("base")
+def test_edit_uploads_clai_bytes_and_preserves_subject_then_connect_order() -> None:
+    subject = version("subject")
     first = version("first")
     second = version("second")
-    provider, transport, reader = provider_for((base, first, second))
+    provider, transport, reader = provider_for((subject, first, second))
 
     job = provider.execute(
-        request(Op.EDIT_REF_GUIDED, base=base, connects=(first, second))
+        request(Op.EDIT_REF_GUIDED, subject=subject, connects=(first, second))
     )
 
     assert job.endpoint == "fal-ai/nano-banana-pro/edit"
     assert reader.read_urls == [
-        base.artifact_url,
+        subject.artifact_url,
         first.artifact_url,
         second.artifact_url,
     ]
     assert transport.uploads == [
-        (b"bytes-base", "base.png"),
+        (b"bytes-subject", "subject.png"),
         (b"bytes-first", "first.png"),
         (b"bytes-second", "second.png"),
     ]
@@ -284,12 +284,12 @@ def test_generate_ref_uses_edit_endpoint_with_connect_images() -> None:
 
 
 def test_provider_never_silently_drops_a_mask() -> None:
-    base = version("base")
-    mask = MaskSnapshot("rle", 8, 8, base_version_id="base")
-    provider, transport, _ = provider_for((base,))
+    subject = version("subject")
+    mask = MaskSnapshot("rle", 8, 8, subject_version_id="subject")
+    provider, transport, _ = provider_for((subject,))
 
     with pytest.raises(ProviderContractError, match="cannot execute"):
-        provider.execute(request(Op.EDIT_INPAINT, base=base, mask=mask))
+        provider.execute(request(Op.EDIT_INPAINT, subject=subject, mask=mask))
 
     assert transport.submissions == []
 
@@ -430,37 +430,37 @@ def test_http_reader_rejects_non_provider_host_without_requesting() -> None:
 
 
 def test_navy_shoe_acceptance_path_uses_only_fakes(tmp_path: Path) -> None:
-    base = VersionSnapshot(
-        id="shoe-base-v1",
+    subject = VersionSnapshot(
+        id="shoe-subject-v1",
         node_id="source",
-        artifact_url="clai://shoe-base-v1",
+        artifact_url="clai://shoe-subject-v1",
         seed=3329142776,
         edit_depth=0,
     )
     source = NodeSnapshot(
         id="source",
         prompt="a product shoe",
-        active_version_id=base.id,
+        active_version_id=subject.id,
     )
     target = NodeSnapshot(id="target", prompt="make it navy")
     frozen = freeze_run_request(
         target=target,
         inbound_edges=(
-            BaseEdge(
-                "base-edge",
+            SubjectEdge(
+                "subject-edge",
                 source.id,
                 target.id,
-                VersionPin(version_id=base.id),
+                VersionPin(version_id=subject.id),
             ),
         ),
         nodes={source.id: source, target.id: target},
-        versions={base.id: base},
-        random_seed=lambda: pytest.fail("base seed should be inherited"),
+        versions={subject.id: subject},
+        random_seed=lambda: pytest.fail("subject seed should be inherited"),
     )
     transport = FakeFalTransport()
     artifact_reader = FakeArtifactReader(
         {
-            base.artifact_url: ArtifactBytes(
+            subject.artifact_url: ArtifactBytes(
                 content=b"original-shoe",
                 content_type="image/jpeg",
                 filename="shoe.jpg",
@@ -494,7 +494,7 @@ def test_navy_shoe_acceptance_path_uses_only_fakes(tmp_path: Path) -> None:
     stored = ingestor.ingest(result)
 
     assert frozen.op is Op.EDIT_INSTRUCT
-    assert frozen.seed == base.seed
+    assert frozen.seed == subject.seed
     assert transport.uploads == [(b"original-shoe", "shoe.jpg")]
     assert job.endpoint == "fal-ai/nano-banana-pro/edit"
     assert job.request_payload["prompt"] == frozen.prompt_at_runtime

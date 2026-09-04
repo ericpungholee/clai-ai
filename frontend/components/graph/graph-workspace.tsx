@@ -20,12 +20,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createBranch,
   createDesignNode,
-  deleteBaseEdge,
+  deleteSubjectEdge,
   deleteDesignNode,
   getGraph,
   getRun,
   patchDesignNode,
-  replaceBaseEdge,
+  replaceSubjectEdge,
   submitRun,
   toWorkspaceGraph,
   type GraphDocument,
@@ -183,16 +183,16 @@ export function GraphWorkspace({
           if (node.id === nodeId) {
             return { ...node, data: { ...node.data, title } };
           }
-          const currentBase = node.data.base;
-          if (currentBase !== null && currentBase.nodeTitle === previous) {
+          const currentSubject = node.data.subject;
+          if (currentSubject !== null && currentSubject.nodeTitle === previous) {
             return {
               ...node,
               data: {
                 ...node.data,
-                base: {
+                subject: {
                   nodeTitle: title,
-                  versionId: currentBase.versionId,
-                  artifactUrl: currentBase.artifactUrl,
+                  versionId: currentSubject.versionId,
+                  artifactUrl: currentSubject.artifactUrl,
                 },
               },
             };
@@ -205,6 +205,17 @@ export function GraphWorkspace({
       scheduleNodePatch(nodeId, { title });
     },
     [scheduleNodePatch],
+  );
+
+  const updateWhiteBackground = useCallback(
+    (nodeId: string, enabled: boolean) => {
+      const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+      if (!node) return;
+      const settings = { ...node.data.settings, whiteBackground: enabled };
+      updateNodeData(nodeId, { settings });
+      scheduleNodePatch(nodeId, { settings });
+    },
+    [scheduleNodePatch, updateNodeData],
   );
 
   const onNodesChange = useCallback(
@@ -246,7 +257,7 @@ export function GraphWorkspace({
         return next;
       });
       for (const edge of removed) {
-        void deleteBaseEdge(projectId, edge.target).catch(() =>
+        void deleteSubjectEdge(projectId, edge.target).catch(() =>
           setSaveState("failed"),
         );
       }
@@ -266,7 +277,7 @@ export function GraphWorkspace({
       }
       setSaveState("saving");
       try {
-        await replaceBaseEdge(projectId, connection.target, {
+        await replaceSubjectEdge(projectId, connection.target, {
           source_node_id: connection.source,
           version_id: source.data.activeVersionId,
         });
@@ -345,6 +356,7 @@ export function GraphWorkspace({
         await patchDesignNode(projectId, nodeId, {
           prompt: node.data.prompt,
           title: node.data.title,
+          settings: node.data.settings,
         });
         let job = await submitRun(projectId, nodeId, crypto.randomUUID());
         while (job.status !== "complete" && job.status !== "failed") {
@@ -371,11 +383,19 @@ export function GraphWorkspace({
     () => ({
       updatePrompt,
       updateTitle,
+      updateWhiteBackground,
       selectVersion,
       branchVersion,
       runNode,
     }),
-    [branchVersion, runNode, selectVersion, updatePrompt, updateTitle],
+    [
+      branchVersion,
+      runNode,
+      selectVersion,
+      updatePrompt,
+      updateTitle,
+      updateWhiteBackground,
+    ],
   );
 
   return (

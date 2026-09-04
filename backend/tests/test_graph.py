@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.domain.runs import FrozenRunRequest, Op
 from app.main import app
-from app.models.graph import GraphEdge, RunJob, Version, VersionMetric
+from app.models.graph import GraphEdge, GraphNode, RunJob, Version, VersionMetric
 from app.providers.base import ProviderJob, ProviderResult
 from app.services.run_execution import (
     ChangeMagnitudeResult,
@@ -157,6 +157,70 @@ def test_scoped_node_create_and_patch_preserve_position_and_prompt(
     assert saved["position"] == {"x": -40.0, "y": 315.5}
 
 
+def test_white_background_defaults_for_new_nodes_and_freezes_per_version(
+    client: TestClient,
+) -> None:
+    project_id = create_project(client)
+    node = create_node(client, project_id, prompt="A sculptural desk lamp")
+    assert node["settings"]["whiteBackground"] is True
+    enqueuer = CapturingEnqueuer()
+    app.dependency_overrides[get_run_enqueuer] = lambda: enqueuer
+    provider = FakeProvider()
+
+    _, first_version_id = submit_and_execute(
+        client, project_id, str(node["id"]), enqueuer, provider
+    )
+    assert provider.requests[-1].settings.white_background is True
+    assert provider.requests[-1].prompt_at_runtime.endswith(
+        "Place the object on a clean white background."
+    )
+
+    settings = {**node["settings"], "whiteBackground": False}
+    patched = client.patch(
+        f"/api/projects/{project_id}/nodes/{node['id']}",
+        json={"settings": settings},
+    )
+    assert patched.status_code == 200
+    _, second_version_id = submit_and_execute(
+        client, project_id, str(node["id"]), enqueuer, provider
+    )
+    assert provider.requests[-1].settings.white_background is False
+    assert provider.requests[-1].prompt_at_runtime == "A sculptural desk lamp"
+
+    graph = client.get(f"/api/projects/{project_id}/graph").json()
+    versions = {version["id"]: version for version in graph["nodes"][0]["versions"]}
+    assert versions[str(first_version_id)]["params"]["whiteBackground"] is True
+    assert versions[str(second_version_id)]["params"]["whiteBackground"] is False
+    assert versions[str(first_version_id)]["prompt_at_runtime"].endswith(
+        "Place the object on a clean white background."
+    )
+
+
+def test_legacy_node_without_white_background_remains_disabled(
+    client: TestClient,
+) -> None:
+    project_id = create_project(client)
+    node_id = uuid.uuid4()
+    with TestingSessionLocal.begin() as db:
+        db.add(
+            GraphNode(
+                id=node_id,
+                project_id=uuid.UUID(project_id),
+                title="Legacy",
+                prompt="A legacy lamp",
+                settings={"aspect_ratio": "1:1", "width": 1024, "height": 1024},
+                position_x=0,
+                position_y=0,
+            )
+        )
+
+    graph_node = client.get(f"/api/projects/{project_id}/graph").json()["nodes"][0]
+    assert graph_node["settings"]["whiteBackground"] is False
+    with TestingSessionLocal() as db:
+        stored_settings = db.get(GraphNode, node_id).settings
+        assert "whiteBackground" not in stored_settings
+
+
 def test_node_validation_rejects_non_finite_position(client: TestClient) -> None:
     project_id = create_project(client)
     payload = '{"prompt":"shoe","position":{"x":1e309,"y":0}}'
@@ -193,7 +257,7 @@ def test_run_submit_is_idempotent_and_enqueues_once(client: TestClient) -> None:
     assert enqueuer.job_ids == [uuid.UUID(first.json()["id"])]
 
 
-def test_base_drag_replaces_existing_pin(client: TestClient) -> None:
+def test_subject_drag_replaces_existing_pin(client: TestClient) -> None:
     project_id = create_project(client)
     enqueuer = CapturingEnqueuer()
     app.dependency_overrides[get_run_enqueuer] = lambda: enqueuer
@@ -209,11 +273,11 @@ def test_base_drag_replaces_existing_pin(client: TestClient) -> None:
     )
 
     first_edge = client.put(
-        f"/api/projects/{project_id}/nodes/{target['id']}/base",
+        f"/api/projects/{project_id}/nodes/{target['id']}/subject",
         json={"source_node_id": first["id"], "version_id": str(first_version)},
     )
     second_edge = client.put(
-        f"/api/projects/{project_id}/nodes/{target['id']}/base",
+        f"/api/projects/{project_id}/nodes/{target['id']}/subject",
         json={"source_node_id": second["id"], "version_id": str(second_version)},
     )
 
@@ -228,7 +292,7 @@ def test_base_drag_replaces_existing_pin(client: TestClient) -> None:
     }
 
 
-def test_branch_from_historical_version_creates_pinned_base(
+def test_branch_from_historical_version_creates_pinned_subject(
     client: TestClient,
 ) -> None:
     project_id = create_project(client)
@@ -258,15 +322,15 @@ def test_navy_shoe_acceptance_runs_real_pipeline_with_fake_provider(
     provider = FakeProvider()
 
     shoe = create_node(client, project_id, prompt="A blue and yellow running shoe")
-    _, base_version_id = submit_and_execute(
+    _, subject_version_id = submit_and_execute(
         client, project_id, str(shoe["id"]), enqueuer, provider
     )
     branch = create_node(client, project_id, prompt="make it navy", x=440)
     wire = client.put(
-        f"/api/projects/{project_id}/nodes/{branch['id']}/base",
+        f"/api/projects/{project_id}/nodes/{branch['id']}/subject",
         json={
             "source_node_id": shoe["id"],
-            "version_id": str(base_version_id),
+            "version_id": str(subject_version_id),
         },
     )
     assert wire.status_code == 200
@@ -295,14 +359,16 @@ def test_navy_shoe_acceptance_runs_real_pipeline_with_fake_provider(
     assert provider.requests[-1].prompt_at_runtime.endswith(
         "Change only: make it navy\nDo not restyle or reinterpret any other element."
     )
-    assert provider.requests[-1].input_snapshot.base_version_id == str(base_version_id)
+    assert provider.requests[-1].input_snapshot.subject_version_id == str(
+        subject_version_id
+    )
     graph = client.get(f"/api/projects/{project_id}/graph").json()
     target = next(node for node in graph["nodes"] if node["id"] == branch["id"])
     assert target["active_version_id"] == str(navy_version_id)
     assert len(target["versions"]) == 1
     assert target["versions"][0]["artifact_url"].endswith("same-shoe-navy.png")
     assert target["versions"][0]["input_snapshot"] == {
-        "base_version_id": str(base_version_id),
+        "subject_version_id": str(subject_version_id),
         "connect_version_ids": [],
         "mask_hash": None,
     }
