@@ -14,17 +14,17 @@ FEATHER_PX = 3
 
 def decode_rle(rle: str, width: int, height: int) -> NDArray[np.bool_]:
     if not 0 < width <= 4096 or not 0 < height <= 4096:
-        raise ValueError("Mask dimensions must be between 1 and 4096 pixels")
+        raise ValueError("Area selection dimensions must be between 1 and 4096 pixels")
     tokens = rle.split()
     if len(tokens) % 2:
-        raise ValueError("Mask must contain start/length pairs")
+        raise ValueError("Area selection data is invalid")
     pixels = np.zeros(width * height, dtype=np.bool_)
     previous_end = 0
     for index in range(0, len(tokens), 2):
         start, length = int(tokens[index]) - 1, int(tokens[index + 1])
         end = start + length
         if start < previous_end or length <= 0 or end > pixels.size:
-            raise ValueError("Mask spans overlap or exceed the subject image")
+            raise ValueError("Area selection overlaps or exceeds the input image")
         pixels[start:end] = True
         previous_end = end
     return pixels.reshape(height, width)
@@ -42,7 +42,7 @@ def encode_rle(pixels: NDArray[np.bool_]) -> str:
 def validate_mask(mask: MaskSnapshot) -> bool:
     pixels = decode_rle(mask.rle, mask.width, mask.height)
     if not pixels.any():
-        raise ValueError("The mask is empty. Select an area or clear the mask.")
+        raise ValueError("Select an area first, or choose Remove selection.")
     return bool(pixels.all())
 
 
@@ -58,10 +58,10 @@ def composite_masked_output(
 ) -> tuple[bytes, float]:
     subject = Image.open(BytesIO(original)).convert("RGBA")
     if subject.size != (mask.width, mask.height):
-        raise ValueError("Mask dimensions no longer match the subject image")
+        raise ValueError("Area selection dimensions no longer match the input image")
     pixels = decode_rle(mask.rle, mask.width, mask.height)
     if not pixels.any() or pixels.all():
-        raise ValueError("Compositing requires a nonempty partial mask")
+        raise ValueError("Select a smaller area to preserve the rest of the image.")
     output = Image.open(BytesIO(generated)).convert("RGBA")
     if output.size != subject.size:
         output = output.resize(subject.size, Image.Resampling.LANCZOS)

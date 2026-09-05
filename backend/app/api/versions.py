@@ -1,21 +1,16 @@
 import uuid
-from datetime import UTC, datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.graph import get_project_or_404
 from app.core.database import get_db
-from app.models.graph import GraphNode, RunJob, Version, VersionVisibility
+from app.models.graph import GraphNode, RunJob, Version
 
 router = APIRouter(prefix="/api/projects/{project_id}/versions", tags=["versions"])
-
-
-class VisibilityUpdate(BaseModel):
-    hidden: bool
 
 
 class CollapseReady(BaseModel):
@@ -39,40 +34,8 @@ def project_version(
         .where(Version.id == version_id, GraphNode.project_id == project_id)
     )
     if version is None:
-        raise HTTPException(404, "Version not found")
+        raise HTTPException(404, "Image not found")
     return version
-
-
-@router.put("/{version_id}/visibility", status_code=204)
-def update_visibility(
-    project_id: uuid.UUID,
-    version_id: uuid.UUID,
-    data: VisibilityUpdate,
-    db: Session = Depends(get_db),
-) -> Response:
-    project = get_project_or_404(project_id, db)
-    version = project_version(project_id, version_id, db)
-    visibility = db.get(VersionVisibility, version_id)
-    if data.hidden and visibility is None:
-        db.add(VersionVisibility(version_id=version_id))
-    elif not data.hidden and visibility is not None:
-        db.delete(visibility)
-    db.flush()
-    node = db.get(GraphNode, version.node_id)
-    if data.hidden and node.active_version_id == version_id:
-        node.active_version_id = db.scalar(
-            select(Version.id)
-            .where(
-                Version.node_id == node.id,
-                ~Version.id.in_(select(VersionVisibility.version_id)),
-            )
-            .order_by(Version.created_at.desc(), Version.id.desc())
-            .limit(1)
-        )
-        node.revision += 1
-    project.updated_at = datetime.now(UTC)
-    db.commit()
-    return Response(status_code=204)
 
 
 @router.get(
@@ -94,9 +57,9 @@ def preview_collapse(
         if current.op != "edit_instruct":
             return CollapseUnavailable(
                 reason=(
-                    "This chain includes a mask or connect reference. Its regions "
+                    "This chain includes an area selection or reference. Its regions "
                     "and image positions cannot be safely reapplied to the root. "
-                    "Branch from an earlier version instead."
+                    "Continue editing an earlier image instead."
                 )
             )
         job = db.get(RunJob, current.run_job_id)
@@ -123,7 +86,7 @@ def preview_collapse(
         subject_id = current.input_snapshot.get("subject_version_id")
         if not isinstance(subject_id, str):
             return CollapseUnavailable(
-                reason="This historical edit has no recorded subject."
+                reason="This historical edit has no recorded input image."
             )
         current = project_version(project_id, uuid.UUID(subject_id), db)
     if len(instructions) < 2:
@@ -140,7 +103,7 @@ def preview_collapse(
         return CollapseUnavailable(
             reason=(
                 "The accumulated instructions exceed the prompt limit. "
-                "Branch from an earlier version instead."
+                "Continue editing an earlier image instead."
             )
         )
     return CollapseReady(

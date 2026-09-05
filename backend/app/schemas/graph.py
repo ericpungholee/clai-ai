@@ -37,7 +37,6 @@ class VersionData(BaseModel):
     input_snapshot: dict[str, JsonValue]
     prompt_at_runtime: str
     edit_depth: int
-    hidden: bool = False
     branch_node_ids: list[uuid.UUID] = Field(default_factory=list)
     masked_outside_change: float | None = None
 
@@ -125,14 +124,20 @@ class GraphDocument(BaseModel):
 
 class NodeCreate(BaseModel):
     id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    title: Title = "Untitled concept"
+    title: Title = "Untitled node"
     prompt: str = Field(default="", max_length=8000)
     settings: NodeSettingsData = Field(default_factory=NodeSettingsData)
     seed: int | None = None
     position: GraphPosition
 
 
+class NodeDuplicate(NodeCreate):
+    fresh_seed: bool = False
+
+
 class NodeUpdate(BaseModel):
+    subject: dict | None = None
+    mask: MaskData | None = None
     expected_revision: int | None = Field(default=None, ge=0)
     title: Title | None = None
     prompt: str | None = Field(default=None, max_length=8000)
@@ -149,7 +154,7 @@ class SubjectEdgeReplace(BaseModel):
 
 class BranchCreate(BaseModel):
     id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    title: Title = "Untitled concept"
+    title: Title = "Untitled node"
     prompt: str = Field(default="", max_length=8000)
     settings: NodeSettingsData = Field(default_factory=NodeSettingsData)
     position: GraphPosition

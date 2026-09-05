@@ -4,13 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import type { Version } from "@/lib/graph";
 
 export function ImageViewer({
-  versions,
+  versions: initialVersions,
+  nodeNames = {},
   onClose,
 }: {
   versions: Version[];
+  nodeNames?: Record<string, string>;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const versions = initialVersions;
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
@@ -22,8 +25,8 @@ export function ImageViewer({
     >
       <header className="mb-3 flex items-center justify-between">
         <p className="text-sm">
-          {versions.length === 2 ? "Compare versions" : "Inspect image"} ·
-          Scroll to zoom, drag to pan
+          {versions.length === 2 ? "Compare images" : "Inspect image"} · Scroll
+          to zoom, drag to pan
         </p>
         <button
           onClick={onClose}
@@ -39,13 +42,7 @@ export function ImageViewer({
           <ImagePane
             key={`${index}:${version.id}`}
             version={version}
-            label={
-              versions.length === 2
-                ? index === 0
-                  ? "Before / reference"
-                  : "After / comparison"
-                : "Original image"
-            }
+            label={nodeNames[version.node_id] ?? "Image"}
           />
         ))}
       </div>

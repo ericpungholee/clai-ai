@@ -172,7 +172,7 @@ def test_resolution_rejects_second_subject_edge() -> None:
         SubjectEdge("e2", "b", "target", VersionPin(version_id="v2")),
     )
 
-    with pytest.raises(RunResolutionError, match="at most one subject"):
+    with pytest.raises(RunResolutionError, match="one input image"):
         resolve_inputs(
             target=target,
             inbound_edges=edges,
@@ -200,7 +200,7 @@ def test_resolution_rejects_third_connect_edge() -> None:
         for index in range(3)
     )
 
-    with pytest.raises(RunResolutionError, match="at most two connect"):
+    with pytest.raises(RunResolutionError, match="Two references maximum"):
         resolve_inputs(
             target=target,
             inbound_edges=edges,
@@ -218,7 +218,7 @@ def test_resolution_rejects_stale_mask() -> None:
     )
     subject = version("current", "source")
 
-    with pytest.raises(RunResolutionError, match="mask is stale"):
+    with pytest.raises(RunResolutionError, match="different image"):
         resolve_inputs(
             target=target,
             inbound_edges=(
@@ -392,3 +392,35 @@ def test_valid_mask_is_hashed_into_frozen_provenance() -> None:
     assert request.op is Op.EDIT_INPAINT
     assert request.input_snapshot.mask_hash is not None
     assert len(request.input_snapshot.mask_hash) == 64
+
+
+def test_auto_title_uses_chip_source_title_instead_of_runtime_image_number() -> None:
+    from app.services.run_execution import auto_node_title
+
+    assert (
+        auto_node_title(
+            [
+                {"type": "connect", "edge_id": "reference", "source_node_id": "bottle"},
+                {"type": "text", "text": ". the cap should be same size"},
+            ],
+            {"bottle": "Bottle base"},
+        )
+        == "Bottle base. the cap should"
+    )
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        ("image 2. the cap should be same size", "the cap should be same"),
+        ("Image 3: brass cap", "brass cap"),
+        ("image 2", "Untitled concept"),
+        ("image 2 image 3: cap", "Untitled concept"),
+        ("", "Untitled concept"),
+        ("a" * 80, "a" * 60),
+    ],
+)
+def test_auto_title_strips_placeholders_and_limits_length(prompt, expected) -> None:
+    from app.services.run_execution import auto_node_title
+
+    assert auto_node_title([{"type": "text", "text": prompt}], {}) == expected

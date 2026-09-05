@@ -29,6 +29,10 @@ class RunSubmissionError(ValueError):
     pass
 
 
+class ResultRunError(RunSubmissionError):
+    pass
+
+
 def submit_run(
     *,
     project_id: uuid.UUID,
@@ -46,6 +50,12 @@ def submit_run(
     )
     if existing is not None:
         return existing, False
+
+    if db.scalar(select(Version.id).where(Version.node_id == node_id).limit(1)):
+        raise ResultRunError(
+            "This node already has an image. Continue editing, Try "
+            "another, or Revise prompt to make a new node."
+        )
 
     # A response can be lost after enqueue, or another tab can still show Run.
     # Reuse the in-flight job instead of charging for a duplicate generation.
@@ -81,9 +91,11 @@ def submit_run(
     return job, True
 
 
-def preview_run(*, project_id: uuid.UUID, node_id: uuid.UUID, db: Session) -> str:
+def preview_run(
+    *, project_id: uuid.UUID, node_id: uuid.UUID, db: Session
+) -> FrozenRunRequest:
     target = _lock_target(project_id, node_id, db)
-    return _freeze_node_run(target, db, lambda: 0).op.value
+    return _freeze_node_run(target, db, lambda: 0)
 
 
 def _lock_target(project_id: uuid.UUID, node_id: uuid.UUID, db: Session) -> GraphNode:
@@ -137,6 +149,11 @@ def _freeze_node_run(
         if node.deleted_at is None
     }
     chips = [part for part in target_row.prompt if part["type"] == "connect"]
+    if target_row.mask_rle and chips:
+        raise RunSubmissionError(
+            "Area selections can't be combined with references. Remove "
+            "the selection first."
+        )
     connects = sorted(
         (edge for edge in edge_rows if edge.role == "connect"),
         key=lambda edge: edge.connect_order,
@@ -197,11 +214,6 @@ def _freeze_node_run(
         versions=versions,
         random_seed=random_seed,
     )
-    if frozen.mask is not None and frozen.connects:
-        raise RunSubmissionError(
-            "FLUX Fill cannot use connect images. Remove the connect chips "
-            "or clear the mask before running."
-        )
     return frozen
 
 

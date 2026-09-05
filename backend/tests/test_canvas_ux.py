@@ -138,7 +138,7 @@ def test_duplicate_keeps_draft_wiring_but_not_someone_elses_versions(
     ] == str(version)
 
 
-def test_graph_rehydrates_durable_run_and_completion_never_overwrites_draft(
+def test_graph_rehydrates_durable_run_and_locks_the_draft(
     client: TestClient,
 ) -> None:
     project = create_project(client)
@@ -164,7 +164,7 @@ def test_graph_rehydrates_durable_run_and_completion_never_overwrites_draft(
         scorer=FakeDinoV2Scorer(),
     )
     graph = client.get(f"/api/projects/{project}/graph").json()
-    assert graph["nodes"][0]["prompt"] == "New draft while running"
+    assert graph["nodes"][0]["prompt"] == "First frozen instruction"
     assert graph["nodes"][0]["run"]["status"] == "complete"
     assert graph["nodes"][0]["versions"][0]["prompt_at_runtime"].startswith(
         "First frozen instruction"

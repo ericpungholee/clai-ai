@@ -64,11 +64,43 @@ def test_mask_save_stale_block_and_frozen_composited_commit(
     assert client.put(prefix + "/mask", json={**mask, "width": 40}).status_code == 422
     assert client.put(prefix + "/mask", json={**mask, "rle": " "}).status_code == 422
     assert client.put(prefix + "/mask", json=mask).status_code == 200
+    references = [
+        {
+            "type": "connect",
+            "edge_id": str(uuid.uuid4()),
+            "source_node_id": source["id"],
+        }
+    ]
+    assert (
+        client.put(
+            prefix + "/prompt", json={"document": references, "expected_revision": 0}
+        ).status_code
+        == 422
+    )
+    assert client.put(prefix + "/mask", json=None).status_code == 200
+    assert (
+        client.put(
+            prefix + "/prompt", json={"document": references, "expected_revision": 0}
+        ).status_code
+        == 200
+    )
+    assert client.put(prefix + "/mask", json=mask).status_code == 409
+    assert (
+        client.put(
+            prefix + "/prompt",
+            json={
+                "document": [{"type": "text", "text": "remove the logo"}],
+                "expected_revision": 1,
+            },
+        ).status_code
+        == 200
+    )
+    assert client.put(prefix + "/mask", json=mask).status_code == 200
     submitted = client.post(prefix + "/runs", json={"idempotency_key": "masked"})
     assert submitted.status_code == 202
     assert submitted.json()["op"] == "edit_inpaint"
-    assert client.put(prefix + "/mask", json=None).status_code == 200
-    assert client.patch(prefix, json={"prompt": "a newer draft"}).status_code == 200
+    assert client.put(prefix + "/mask", json=None).status_code == 409
+    assert client.patch(prefix, json={"prompt": "a newer draft"}).status_code == 409
     generated_reader = HttpArtifactReader(
         allowed_hosts=frozenset({"fake.provider"}),
         client=httpx.Client(
@@ -109,17 +141,22 @@ def test_mask_save_stale_block_and_frozen_composited_commit(
             and metric.method == "outside_feather_pixel_diff"
             and metric.change_magnitude == 0
         )
-    assert client.put(prefix + "/mask", json=mask).status_code == 200
+    assert client.put(prefix + "/mask", json=mask).status_code == 409
+    revised = client.post(
+        prefix + "/duplicate", json={"position": {"x": 0, "y": 850}}
+    ).json()
+    prefix = f"/api/projects/{project}/nodes/{revised['id']}"
+    other = create_node(client, project, prompt="another shoe")
     _, second_id = submit_and_execute(
-        client, project, str(source["id"]), queue, provider
+        client, project, str(other["id"]), queue, provider
     )
     assert (
         client.put(
             prefix + "/subject",
-            json={"source_node_id": source["id"], "version_id": str(second_id)},
+            json={"source_node_id": other["id"], "version_id": str(second_id)},
         ).status_code
         == 200
     )
     assert client.put(prefix + "/mask", json=mask).status_code == 409
     stale = client.post(prefix + "/runs", json={"idempotency_key": "stale"})
-    assert stale.status_code == 422 and "stale" in stale.text
+    assert stale.status_code == 422 and "different image" in stale.text

@@ -53,6 +53,11 @@ def freeze_run_request(
         connect_count=len(resolved.connects),
     )
 
+    snapshot = InputSnapshot(
+        subject_version_id=resolved.subject.id if resolved.subject else None,
+        connect_version_ids=tuple(version.id for version in resolved.connects),
+        mask_hash=hash_mask(resolved.mask),
+    )
     return FrozenRunRequest(
         node_id=target.id,
         user_prompt=target.prompt,
@@ -67,10 +72,6 @@ def freeze_run_request(
         subject=resolved.subject,
         connects=resolved.connects,
         mask=resolved.mask,
-        input_snapshot=InputSnapshot(
-            subject_version_id=resolved.subject.id if resolved.subject else None,
-            connect_version_ids=tuple(version.id for version in resolved.connects),
-            mask_hash=hash_mask(resolved.mask),
-        ),
+        input_snapshot=snapshot,
         edit_depth=calculate_edit_depth(op=op, subject=resolved.subject),
     )

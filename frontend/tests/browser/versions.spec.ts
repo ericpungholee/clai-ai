@@ -1,39 +1,68 @@
 import { expect, test } from "@playwright/test";
-
-test("fifteen numbered versions stay navigable, inspectable, comparable and retained", async ({
+const api = "http://127.0.0.1:8109";
+test.beforeEach(async ({ request }) => {
+  await request.post(`${api}/reset`);
+});
+test("legacy images stay selectable without per-image mutation actions", async ({
   page,
   request,
 }) => {
-  await request.post("http://127.0.0.1:8109/reset");
-  await request.post("http://127.0.0.1:8109/many-versions");
+  await request.post(`${api}/many-versions`);
   await page.goto("/projects/fixture-project");
   const source = page.locator('.react-flow__node[data-id="source"]');
   await expect(
-    source.getByRole("button", { name: "Select version 15", exact: true }),
+    source.getByText(
+      "Older project — this node has 15 images. New nodes make one image each.",
+    ),
+  ).toBeVisible();
+  await expect(
+    source.getByRole("button", { name: "Select image 15", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
-  await source.getByRole("button", { name: "Inspect active image" }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
+  await source
+    .getByRole("button", { name: "Select image 1", exact: true })
+    .click();
+  await expect
+    .poll(
+      async () =>
+        (
+          await (
+            await request.get(`${api}/api/projects/fixture-project/graph`)
+          ).json()
+        ).nodes[0].active_version_id,
+    )
+    .toBe("subject");
+  await source.getByRole("button", { name: "Inspect result" }).click();
+  await expect(page.getByRole("dialog")).toContainText("Desk lamp");
   await page.getByRole("button", { name: "Zoom in", exact: true }).click();
   await expect(page.getByRole("dialog").getByRole("img")).toHaveCSS(
     "transform",
     /1.25/,
   );
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await source.getByLabel("Compare active version to").selectOption("subject");
-  await expect(page.getByRole("dialog").getByRole("img")).toHaveCount(2);
-  await page.keyboard.press("Escape");
-  await source
-    .getByRole("button", { name: "Hide version 15", exact: true })
-    .click();
   await expect(
-    source.getByRole("button", { name: "Select version 15", exact: true }),
+    source.getByRole("button", { name: "Run", exact: true }),
   ).toHaveCount(0);
-  await source.getByRole("button", { name: "Show retained" }).click();
-  await source
-    .getByRole("button", { name: "Restore version 15", exact: true })
-    .click();
   await expect(
-    source.getByRole("button", { name: "Select version 15", exact: true }),
-  ).toBeVisible();
+    source.getByRole("button", { name: /Hide|Restore|Compare|Branch/ }),
+  ).toHaveCount(0);
+});
+test("result is a frozen picture with three ways forward", async ({ page }) => {
+  await page.goto("/projects/fixture-project");
+  const source = page.locator('.react-flow__node[data-id="source"]');
+  await expect(
+    source.getByRole("textbox", { name: "Design prompt" }),
+  ).toHaveAttribute("contenteditable", "false");
+  await expect(source.getByLabel("Legacy images")).toHaveCount(0);
+  for (const name of ["Continue editing", "Try another", "Revise prompt"])
+    await expect(
+      source.getByRole("button", { name, exact: true }),
+    ).toBeVisible();
+  for (const name of ["Run", "White bg", "Select area"])
+    await expect(source.getByRole("button", { name, exact: true })).toHaveCount(
+      0,
+    );
+  await source.getByRole("textbox", { name: "Node title" }).fill("My lamp");
+  await expect(source.getByRole("textbox", { name: "Node title" })).toHaveValue(
+    "My lamp",
+  );
 });

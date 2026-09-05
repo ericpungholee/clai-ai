@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.main import app
-from app.models.graph import GraphNode, RunJob, Version, VersionVisibility
+from app.models.graph import GraphNode, RunJob, Version
 from app.services.run_queue import get_run_enqueuer
 from tests.conftest import TestingSessionLocal
 from tests.test_graph import (
@@ -17,7 +17,7 @@ from tests.test_graph import (
 )
 
 
-def test_collapse_is_an_explicit_draft_and_hiding_never_erases_history(
+def test_collapse_is_an_explicit_draft_and_deletion_never_erases_history(
     client: TestClient,
 ) -> None:
     project = create_project(client)
@@ -59,12 +59,6 @@ def test_collapse_is_an_explicit_draft_and_hiding_never_erases_history(
     assert len(root_node["versions"][0]["branch_node_ids"]) == 1
     with TestingSessionLocal() as db:
         prompts_before = list(db.execute(select(Version.id, Version.prompt_at_runtime)))
-    assert client.put(prefix + "/visibility", json={"hidden": True}).status_code == 204
-    graph = client.get(f"/api/projects/{project}/graph").json()
-    hidden_node = next(node for node in graph["nodes"] if node["id"] == node_id)
-    assert hidden_node["active_version_id"] is None
-    assert hidden_node["versions"][0]["hidden"]
-    assert hidden_node["versions"][0]["artifact_url"] == original["artifact_url"]
     collapsed = client.post(
         f"/api/projects/{project}/versions/{root_version}/branches",
         json={"prompt": preview["instruction"], "position": {"x": 0, "y": 500}},
@@ -73,12 +67,9 @@ def test_collapse_is_an_explicit_draft_and_hiding_never_erases_history(
     assert provider.requests[-1].subject.id == str(root_version)
     assert provider.requests[-1].edit_depth == 1
     assert provider.requests[-1].user_prompt == preview["instruction"]
-    assert client.put(prefix + "/visibility", json={"hidden": False}).status_code == 204
-    assert client.put(prefix + "/visibility", json={"hidden": True}).status_code == 204
     assert client.delete(f"/api/projects/{project}/nodes/{node_id}").status_code == 204
     with TestingSessionLocal() as db:
         assert db.get(Version, version) is not None
-        assert db.get(VersionVisibility, version) is not None
         assert db.get(GraphNode, uuid.UUID(node_id)).deleted_at is not None
         assert set(prompts_before) <= set(
             db.execute(select(Version.id, Version.prompt_at_runtime))

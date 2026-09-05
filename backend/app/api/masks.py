@@ -18,6 +18,7 @@ from app.models.project import Project
 from app.providers.fal_transport import FalSdkTransport
 from app.providers.sam import SamSelector
 from app.schemas.graph import MaskData
+from app.services.graph_service import GraphConflictError, assert_draft_editable
 from app.services.masks import validate_mask
 from app.storage.factory import create_artifact_reader
 
@@ -60,6 +61,14 @@ def put_mask(
     )
     if node is None:
         raise HTTPException(404, "Node not found")
+    try:
+        assert_draft_editable(node, db)
+    except GraphConflictError as error:
+        raise HTTPException(409, str(error)) from error
+    if data is not None and any(part["type"] == "connect" for part in node.prompt):
+        raise HTTPException(
+            409, "This node has references. Remove them to save an area selection."
+        )
     if data is None:
         node.mask_rle = node.mask_width = node.mask_height = (
             node.mask_subject_version_id
@@ -73,11 +82,12 @@ def put_mask(
         if edge is None or edge.pinned_version_id != data.subject_version_id:
             raise HTTPException(
                 409,
-                "The subject changed. Reopen the mask editor for its current version.",
+                "Area selection belongs to a different image. Select "
+                "it again or remove it.",
             )
         version = db.get(Version, data.subject_version_id)
         if version is None:
-            raise HTTPException(404, "Subject version not found")
+            raise HTTPException(404, "Input image not found")
         try:
             validate_mask(
                 MaskSnapshot(
@@ -86,7 +96,7 @@ def put_mask(
             )
             image = create_artifact_reader(settings).read(version.artifact_url)
             if Image.open(BytesIO(image.content)).size != (data.width, data.height):
-                raise ValueError("Mask dimensions must match the subject image")
+                raise ValueError("Area selection dimensions must match the input image")
         except ValueError as error:
             raise HTTPException(422, str(error)) from error
         node.mask_rle, node.mask_width, node.mask_height = (
@@ -119,7 +129,7 @@ def select_region(
         )
     )
     if artifact_url is None:
-        raise HTTPException(404, "Version not found")
+        raise HTTPException(404, "Image not found")
     if not data.text.strip() and not data.points:
         raise HTTPException(422, "Click the image or describe an area to select")
     artifact = create_artifact_reader(settings).read(artifact_url)
@@ -137,7 +147,7 @@ def select_region(
         )
     except Exception as error:
         raise HTTPException(
-            502, "Selection failed. Your existing mask is unchanged."
+            502, "Selection failed. Your existing area selection is unchanged."
         ) from error
     if mask is None:
         return None

@@ -6,7 +6,7 @@ from app.providers.base import ArtifactReader
 from app.storage.artifacts import ArtifactStore, StoredArtifact, image_content_type
 
 
-def validate_glb(content: bytes) -> None:
+def validate_glb(content: bytes, *, require_texture: bool = False) -> None:
     if len(content) < 20:
         raise ValueError("The provider did not return a GLB mesh")
     magic, version, length, json_length, kind = struct.unpack_from("<4sIIII", content)
@@ -19,6 +19,37 @@ def validate_glb(content: bytes) -> None:
             raise ValueError(
                 "The mesh contains an external asset instead of a self-contained GLB"
             )
+    if require_texture:
+        materials = document.get("materials", [])
+        textures = document.get("textures", [])
+        images = document.get("images", [])
+        for mesh in document.get("meshes", []):
+            for primitive in mesh.get("primitives", []):
+                material_index = primitive.get("material")
+                if not isinstance(material_index, int) or not (
+                    0 <= material_index < len(materials)
+                ):
+                    continue
+                color_texture = (
+                    materials[material_index]
+                    .get("pbrMetallicRoughness", {})
+                    .get("baseColorTexture", {})
+                )
+                texture_index = color_texture.get("index")
+                if not isinstance(texture_index, int) or not (
+                    0 <= texture_index < len(textures)
+                ):
+                    continue
+                image_index = textures[texture_index].get("source")
+                if isinstance(image_index, int) and 0 <= image_index < len(images):
+                    source = images[image_index]
+                    if "bufferView" in source or source.get("uri", "").startswith(
+                        "data:image/"
+                    ):
+                        return
+        raise ValueError(
+            "The provider returned a mesh without the image's color texture"
+        )
 
 
 @dataclass(frozen=True)
@@ -33,16 +64,18 @@ def ingest_mesh(
     reader: ArtifactReader,
     store: ArtifactStore,
     attempt_id: str,
-    textured: bool = False,
+    textured: bool = True,
 ) -> StoredMesh:
-    # Untextured Tripo responses leave model_mesh null and populate base_model.
-    mesh = response.get("model_mesh") or response.get(
-        "pbr_model" if textured else "base_model"
+    # Prefer the textured artifact when the provider also returns base geometry.
+    mesh = (
+        response.get("pbr_model") or response.get("model_mesh")
+        if textured
+        else response.get("model_mesh") or response.get("base_model")
     )
     if not isinstance(mesh, dict) or not isinstance(mesh.get("url"), str):
         raise ValueError("The provider returned no mesh")
     content = reader.read(mesh["url"]).content
-    validate_glb(content)
+    validate_glb(content, require_texture=textured)
     artifact = store.put(
         key=f"meshes/{attempt_id}/model.glb",
         content=content,

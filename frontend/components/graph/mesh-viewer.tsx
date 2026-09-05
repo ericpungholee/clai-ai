@@ -23,7 +23,6 @@ export function MeshViewer({
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [textured, setTextured] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const previewCallback = useRef(onPreview);
   useEffect(() => {
@@ -76,7 +75,7 @@ export function MeshViewer({
       setState({
         status: "ready",
         mesh: await requestMesh(projectId, version.id, {
-          texture: textured ? "standard" : "no",
+          texture: "standard",
           attempt_id: crypto.randomUUID(),
         }),
       });
@@ -98,24 +97,31 @@ export function MeshViewer({
     >
       <header className="flex justify-between">
         <h2 className="font-semibold">
-          3D form view ·{" "}
-          {mesh?.texture === "standard" ? "textured" : "untextured"}
+          3D view · {mesh?.texture === "no" ? "shape only" : "color & design"}
         </h2>
         <button onClick={onClose}>Back to canvas · Esc</button>
       </header>
       <p className="mt-2 rounded bg-amber-50 p-3 text-sm text-amber-900">
-        The rear and hidden sides are inferred, not designed. This is a
-        single-image form study, not CAD or a manufacturable mesh.
+        The rear and hidden sides are inferred. Colors and printed details are
+        reconstructed from the 2D image and may vary.
       </p>
       <main className="relative mt-4 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-lg bg-neutral-200">
         {mesh?.status === "complete" ? (
-          <GlbView key={version.id} mesh={mesh} />
+          <>
+            <GlbView key={mesh.attempt_id} mesh={mesh} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={version.artifact_url}
+              alt="Original 2D image used for this 3D view"
+              className="pointer-events-none absolute left-3 top-3 max-h-32 max-w-32 rounded border border-neutral-300 bg-white object-contain"
+            />
+          </>
         ) : (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={version.artifact_url}
-              alt="Image used for this version's 3D view"
+              alt="Image used for this image’s 3D view"
               className="mb-5 max-h-[45%] max-w-[60%] rounded object-contain"
             />
             {waiting ? (
@@ -125,7 +131,7 @@ export function MeshViewer({
                     ? "Queued"
                     : mesh.status === "ingesting"
                       ? "Saving the mesh and preview"
-                      : "Generating the 3D form"}{" "}
+                      : "Generating 3D shape, colors and print"}{" "}
                   · {seconds}s in this view
                 </p>
                 <p className="mt-2 text-sm text-neutral-600">
@@ -136,7 +142,7 @@ export function MeshViewer({
             ) : state.status === "loading" || state.status === "submitting" ? (
               <p role="status">
                 {state.status === "loading"
-                  ? "Checking this version’s cache…"
+                  ? "Checking saved 3D image…"
                   : "Queueing one 3D generation…"}
               </p>
             ) : (
@@ -147,37 +153,41 @@ export function MeshViewer({
                   </p>
                 ) : null}
                 <p className="mb-3 text-sm">
-                  Generate once, then reuse this version’s cached view. Our
-                  untextured check took about 72 seconds before download; queue
-                  time and textured generation may take longer.
+                  Create a 3D view from this exact 2D image, including its
+                  colors and printed design. Generation can take a few minutes;
+                  the finished view is saved for this image.
                 </p>
-                <label className="flex items-center justify-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={textured}
-                    onChange={(event) => setTextured(event.target.checked)}
-                  />
-                  Standard textures · $0.30 instead of $0.20
-                </label>
                 <button
                   onClick={create}
                   className="mt-4 rounded bg-neutral-900 px-4 py-2 text-sm text-white"
                 >
-                  {mesh?.status === "failed" ? "Retry" : "Generate"} 3D · $
-                  {textured ? "0.30" : "0.20"}
+                  {mesh?.status === "failed" ? "Retry" : "Generate"} 3D
                 </button>
                 <p className="mt-2 text-xs text-neutral-500">
-                  Grey geometry is the default. No HD, style or quad-mesh
-                  surcharges.
+                  Colors and print included.
                 </p>
               </div>
             )}
           </>
         )}
       </main>
+      {mesh?.status === "complete" && mesh.texture === "no" ? (
+        <div className="mt-3 flex items-center justify-between gap-4 rounded bg-white p-3 text-sm">
+          <p>
+            This saved model contains only the shape. Regenerate it from the 2D
+            image to include colors and print.
+          </p>
+          <button
+            onClick={create}
+            className="shrink-0 rounded bg-neutral-900 px-4 py-2 text-white"
+          >
+            Generate with colors & print
+          </button>
+        </div>
+      ) : null}
       {mesh?.status === "complete" ? (
         <p className="mt-2 text-xs text-neutral-500">
-          Cached for this exact image version.{" "}
+          Saved for this image.{" "}
           {mesh.elapsed_seconds !== null
             ? `Generated and saved in ${Math.round(mesh.elapsed_seconds)}s.`
             : ""}{" "}

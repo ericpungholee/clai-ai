@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
-.prompt-editor:empty::before { content: attr(data-placeholder); color: #a3a3a3; pointer-events: none; }
+.prompt-editor:empty::before {
+  content: attr(data-placeholder);
+  color: #a3a3a3;
+  pointer-events: none;
+}
 @import "@xyflow/react/dist/style.css";
 
 :root {
@@ -52,10 +56,6 @@ a {
   --xy-selection-border-default: 1px solid #38bdf8;
 }
 
-.react-flow__edge.selected .react-flow__edge-path {
-  stroke: var(--accent);
-}
-
 .react-flow__controls {
   overflow: hidden;
   border: 1px solid #d4d4d8;
@@ -86,3 +86,255 @@ a {
   background: transparent;
   font-size: 9px;
 }
+
+/* Role tokens: handles and edge endpoints share these dimensions and colors. */
+:root {
+  --wire-subject: #1e5eff;
+  --wire-reference: #9561b5;
+  --wire-error: #dc2626;
+  --wire-handle-size: 9px;
+  --wire-handle-stroke: 1.5px;
+  --wire-handle-radius: calc(
+    (var(--wire-handle-size) - var(--wire-handle-stroke)) / 2
+  );
+  --wire-subject-fallback-position: 30%;
+  --wire-subject-position: 35%;
+  --wire-reference-position: 70%;
+}
+.design-card {
+  position: relative;
+  border: 1px solid #d4d4d4;
+  box-shadow: 0 1px 2px #0001;
+}
+.design-card:hover,
+.design-card[data-wire-highlighted="true"] {
+  box-shadow: 0 3px 10px #0002;
+}
+.design-card[data-selected="true"] {
+  border: 1.5px solid #262626;
+  box-shadow: 0 3px 10px #0002;
+}
+.design-card[data-blocked="true"] {
+  border: 1.5px solid var(--wire-error);
+}
+.node-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+.subject-dock {
+  position: relative;
+  height: 0;
+  opacity: 0;
+  margin-left: -10px;
+  margin-bottom: -8px;
+  transition:
+    height 150ms,
+    opacity 150ms,
+    margin-bottom 150ms;
+}
+.subject-dock[data-connected="true"] {
+  height: 24px;
+  opacity: 1;
+  margin-bottom: 0;
+}
+.subject-dock[data-connected="false"] {
+  overflow: hidden;
+  pointer-events: none;
+}
+.subject-chip {
+  background: #fafafa;
+}
+.react-flow__handle.wire-handle {
+  width: var(--wire-handle-size);
+  height: var(--wire-handle-size);
+  min-width: 0;
+  min-height: 0;
+  opacity: 0;
+  border-width: var(--wire-handle-stroke);
+}
+.react-flow__handle.wire-subject {
+  border-color: var(--wire-subject);
+  background: var(--wire-subject);
+}
+.react-flow__handle.wire-reference {
+  border-color: var(--wire-reference);
+  background: white;
+}
+.react-flow__handle.wire-subject.source {
+  top: var(--wire-subject-position);
+}
+.react-flow__handle.wire-reference.source {
+  top: var(--wire-reference-position);
+}
+.react-flow__handle.subject-fallback {
+  top: var(--wire-subject-fallback-position);
+}
+.subject-anchor .react-flow__handle.target {
+  top: 50%;
+  left: 10px;
+}
+.prompt-anchor .react-flow__handle.target {
+  top: 50%;
+}
+.design-card:hover .wire-handle.available:not([data-dragging]),
+.wire-handle.available:focus-visible,
+.react-flow__handle.wire-handle.valid-drop {
+  opacity: 1;
+}
+.wire-endpoint {
+  r: var(--wire-handle-radius);
+}
+.react-flow__edgelabel-renderer {
+  z-index: 6;
+}
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  color: #737373;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.icon-button:hover,
+.icon-button[aria-pressed="true"] {
+  color: #262626;
+  background: #e5e5e5;
+}
+button:focus-visible,
+summary:focus-visible,
+.prompt-chip:focus-visible {
+  outline: 2px solid #262626;
+  outline-offset: 2px;
+}
+.overflow-menu-content {
+  width: 220px;
+  max-height: 270px;
+  overflow: auto;
+  border: 1px solid #e5e5e5;
+  border-radius: 6px;
+  padding: 4px;
+  background: white;
+  color: #404040;
+  box-shadow: 0 4px 16px #0002;
+}
+.overflow-menu-content button {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 3px;
+}
+.overflow-menu-content button:hover {
+  background: #f5f5f5;
+}
+.preview-toolbar,
+.thumbnail-menu {
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.image-preview:hover .preview-toolbar,
+.image-preview:focus-within .preview-toolbar,
+.version-thumbnail:hover .thumbnail-menu,
+.version-thumbnail:focus-within .thumbnail-menu {
+  opacity: 1;
+}
+.wire-badge {
+  position: absolute;
+  pointer-events: all;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+  border: 1.5px solid var(--badge-color);
+  color: var(--badge-color);
+  font: 600 10px/13px sans-serif;
+  text-align: center;
+}
+.wire-badge::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+}
+.wire-badge.filled {
+  background: var(--badge-color);
+  color: white;
+}
+.wire-badge .badge-remove {
+  display: none;
+}
+.wire-badge.active .badge-number {
+  display: none;
+}
+.wire-badge.active .badge-remove {
+  display: inline;
+}
+.wire-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border: 1px solid var(--wire-reference);
+  border-radius: 50%;
+  color: var(--wire-reference);
+  font: 600 10px/1 sans-serif;
+}
+.subject-number {
+  background: var(--wire-subject);
+  color: white;
+  border-color: var(--wire-subject);
+}
+.prompt-chip {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: baseline;
+  gap: 4px;
+  margin: 0 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: #f3eaf9;
+  color: #67417f;
+  font-size: 11px;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.prompt-chip.broken {
+  background: #fef2f2;
+  color: var(--wire-error);
+}
+.prompt-chip[data-highlighted="true"],
+.subject-chip[data-highlighted="true"] {
+  outline: 2px solid var(--wire-reference);
+}
+.subject-chip[data-highlighted="true"] {
+  outline-color: var(--wire-subject);
+}
+@media (prefers-reduced-motion: reduce) {
+  .subject-dock,
+  .preview-toolbar,
+  .thumbnail-menu {
+    transition: none;
+    animation: none;
+  }
+}
+
+.thumbnail-menu .icon-button {
+  width: 18px;
+  height: 18px;
+}
+
+.design-card[data-state="result"] .prompt-anchor { border-color: transparent; background: transparent; }
+.design-card[data-state="result"] .prompt-editor { min-height: 0; padding: 4px 0; color: #525252; }
+.design-card[data-state="running"] .prompt-anchor { background: #fafafa; opacity: .8; }

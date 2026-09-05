@@ -72,17 +72,22 @@ def test_atomic_chips_order_active_following_broken_refs_and_conflicts(
         ingestor=FakeIngestor(),
         scorer=PendingDinoV2Scorer(),
     )
-    _, new_av = submit_and_execute(client, project, str(a["id"]), queue, provider)
+    # A new draft may reorder references; existing results remain frozen.
+    target = create_node(client, project, prompt="")
+    prefix = f"/api/projects/{project}/nodes/{target['id']}"
+    new_av = av
     assert (
         client.put(
             prefix + "/subject", json={"source_node_id": a["id"], "version_id": str(av)}
         ).status_code
         == 200
     )
+    a_chip = {**a_chip, "edge_id": str(uuid.uuid4())}
+    b_chip = {**b_chip, "edge_id": str(uuid.uuid4())}
     reordered = [a_chip, {"type": "text", "text": " with "}, b_chip]
     assert (
         client.put(
-            prefix + "/prompt", json={"document": reordered, "expected_revision": 1}
+            prefix + "/prompt", json={"document": reordered, "expected_revision": 0}
         ).status_code
         == 200
     )
@@ -102,15 +107,28 @@ def test_atomic_chips_order_active_following_broken_refs_and_conflicts(
     assert client.delete(f"/api/projects/{project}/nodes/{b['id']}").status_code == 204
     graph = client.get(f"/api/projects/{project}/graph").json()
     assert next(node for node in graph["nodes"] if node["id"] == b["id"])["deleted"]
+    # Keep an existing reference through deletion by copying the frozen draft.
+    prior = target
+    copied = client.post(
+        f"/api/projects/{project}/nodes/{prior['id']}/duplicate",
+        json={"position": {"x": 0, "y": 850}},
+    ).json()
+    prefix = f"/api/projects/{project}/nodes/{copied['id']}"
+    a_chip = next(
+        part
+        for part in copied["document"]
+        if part["type"] == "connect" and part["source_node_id"] == a["id"]
+    )
     broken = client.post(prefix + "/runs", json={"idempotency_key": "broken"})
-    assert broken.status_code == 422 and "missing node" in broken.text
+    assert broken.status_code == 422 and "Source deleted" in broken.text
     assert (
         client.put(
-            prefix + "/prompt", json={"document": [a_chip], "expected_revision": 2}
+            prefix + "/prompt", json={"document": [a_chip], "expected_revision": 0}
         ).status_code
         == 200
     )
-    assert len(client.get(f"/api/projects/{project}/graph").json()["edges"]) == 2
+    wires = client.get(f"/api/projects/{project}/graph").json()["edges"]
+    assert len([edge for edge in wires if edge["target_node_id"] == copied["id"]]) == 2
 
 
 def test_duplicate_self_empty_and_plain_at_text(client: TestClient) -> None:

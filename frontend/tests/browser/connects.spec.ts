@@ -17,7 +17,7 @@ test("typing a chip creates a wire and backspace removes the atomic chip with it
   await editor.press("@");
   await page.getByRole("button", { name: "Desk lamp", exact: true }).click();
   await expect(editor.locator('[contenteditable="false"]')).toHaveText(
-    "@Desk lamp",
+    "2@Desk lamp",
   );
   await expect(page.locator(".react-flow__edge")).toHaveCount(2);
   await editor.press("End");
@@ -25,6 +25,9 @@ test("typing a chip creates a wire and backspace removes the atomic chip with it
   await editor.press("Backspace");
   await expect(editor.locator('[contenteditable="false"]')).toHaveCount(0);
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+  await expect(
+    page.getByRole("status", { name: "Saved", exact: true }).first(),
+  ).toBeVisible();
   const graph = await (
     await request.get(
       "http://127.0.0.1:8109/api/projects/fixture-project/graph",

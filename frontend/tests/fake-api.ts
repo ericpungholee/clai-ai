@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { createServer } from "node:http";
 import type { GraphDocument, RunJob } from "../lib/graph.ts";
 import type { MeshData } from "../lib/meshes.ts";
@@ -9,6 +10,35 @@ const project = {
   updated_at: "2026-09-04T00:00:00Z",
   thumbnail_url: null,
 };
+function previewForGraph(graph: GraphDocument, nodeId: string) {
+  const node = graph.nodes.find((node) => node.id === nodeId)!;
+  const subject = graph.edges.find(
+    (edge) => edge.target_node_id === nodeId && edge.role === "subject",
+  );
+  const refs = node.document.flatMap((part) =>
+    part.type === "connect"
+      ? [
+          graph.nodes.find((source) => source.id === part.source_node_id)
+            ?.active_version_id ?? null,
+        ]
+      : [],
+  );
+  const mask =
+    node.mask && node.mask.rle === `1 ${node.mask.width * node.mask.height}`
+      ? null
+      : node.mask;
+  const op = subject
+    ? mask
+      ? "edit_inpaint"
+      : refs.length
+        ? "edit_ref_guided"
+        : "edit_instruct"
+    : refs.length
+      ? "generate_ref"
+      : "generate";
+  return { op };
+}
+
 function fixture(): GraphDocument {
   const settings = {
     aspect_ratio: "1:1",
@@ -34,11 +64,10 @@ function fixture(): GraphDocument {
     },
     prompt_at_runtime: "A lamp",
     edit_depth: 0,
-    hidden: false,
     branch_node_ids: ["target"],
     masked_outside_change: null,
   };
-  return {
+  const result: GraphDocument = {
     nodes: [
       {
         id: "source",
@@ -82,26 +111,57 @@ function fixture(): GraphDocument {
       },
     ],
   };
+  return result;
 }
+
 let graph = fixture();
 const meshes = new Map<string, MeshData>();
-const runs = new Map<string, { job: RunJob; prompt: string }>();
+const runs = new Map<string, { job: RunJob; prompt: string; seed: number }>();
 let projectDeleted = false;
 
-function meshFixture(): Buffer {
-  const binary = Buffer.alloc(36);
+function meshFixture(textured: boolean): Buffer {
+  const binary = Buffer.alloc(60);
   [-1, 0, 0, 1, 0, 0, 0, 2, 0].forEach((value, index) =>
     binary.writeFloatLE(value, index * 4),
+  );
+  [0, 0, 1, 0, 0.5, 1].forEach((value, index) =>
+    binary.writeFloatLE(value, 36 + index * 4),
   );
   const document = {
     asset: { version: "2.0" },
     scene: 0,
     scenes: [{ nodes: [0] }],
     nodes: [{ mesh: 0 }],
-    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, material: 0 }] }],
-    materials: [{ doubleSided: true }],
+    meshes: [
+      {
+        primitives: [
+          { attributes: { POSITION: 0, TEXCOORD_0: 1 }, material: 0 },
+        ],
+      },
+    ],
+    materials: [
+      {
+        doubleSided: true,
+        pbrMetallicRoughness: {
+          metallicFactor: 0,
+          roughnessFactor: 1,
+          ...(textured ? { baseColorTexture: { index: 0 } } : {}),
+        },
+      },
+    ],
+    textures: textured ? [{ source: 0 }] : [],
+    images: textured
+      ? [
+          {
+            uri: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8n8fA+Og/E+Oj///lGAEt3wZT5z8djgAAAABJRU5ErkJggg==",
+          },
+        ]
+      : [],
     buffers: [{ byteLength: binary.length }],
-    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: binary.length }],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: 36 },
+      { buffer: 0, byteOffset: 36, byteLength: 24 },
+    ],
     accessors: [
       {
         bufferView: 0,
@@ -111,6 +171,7 @@ function meshFixture(): Buffer {
         min: [-1, 0, 0],
         max: [1, 2, 0],
       },
+      { bufferView: 1, componentType: 5126, count: 3, type: "VEC2" },
     ],
   };
   let json = JSON.stringify(document);
@@ -169,11 +230,21 @@ createServer(async (request, response) => {
       const version = {
         ...fixture().nodes[0].versions[0],
         id: `result-${entry.job.id}`,
+        artifact_url: `http://127.0.0.1:8109/artifacts/result-${entry.job.id}.svg`,
         node_id: node.id,
         prompt_at_runtime: entry.prompt,
+        seed: entry.seed,
         created_at: new Date().toISOString(),
         branch_node_ids: [],
+        masked_outside_change: node.mask ? 0 : null,
       };
+      if (node.title === "Untitled node")
+        node.title = node.prompt
+          .trim()
+          .split(/\s+/)
+          .slice(0, 5)
+          .join(" ")
+          .slice(0, 60);
       node.versions.push(version);
       node.active_version_id = version.id;
       entry.job.status = "complete";
@@ -184,10 +255,70 @@ createServer(async (request, response) => {
     response.end("{}");
     return;
   }
+  const targetId = path.match(/\/nodes\/([^/]+)/)?.[1];
+  const targetNode = graph.nodes.find((node) => node.id === targetId);
+  const edit =
+    ["PATCH", "PUT", "DELETE"].includes(request.method ?? "") &&
+    (path.endsWith("/prompt") ||
+      path.endsWith("/mask") ||
+      path.endsWith("/subject") ||
+      (request.method === "PATCH" &&
+        ["prompt", "settings", "seed", "subject", "mask"].some(
+          (field) => field in body,
+        )));
+  if (
+    edit &&
+    targetNode &&
+    (targetNode.versions.length ||
+      (targetNode.run &&
+        !["complete", "failed"].includes(targetNode.run.status)))
+  ) {
+    response.writeHead(409).end(
+      JSON.stringify({
+        detail:
+          "This node is frozen. Continue editing or Revise prompt to make a new node.",
+      }),
+    );
+    return;
+  }
+  if (
+    edit &&
+    targetNode &&
+    ((path.endsWith("/mask") &&
+      body &&
+      targetNode.document.some((part) => part.type === "connect")) ||
+      (path.endsWith("/prompt") &&
+        targetNode.mask &&
+        body.document.some(
+          (part: { type: string }) => part.type === "connect",
+        )))
+  ) {
+    response.writeHead(409).end(
+      JSON.stringify({
+        detail:
+          "Area selections can't be combined with references. Remove the selection first.",
+      }),
+    );
+    return;
+  }
+  if (path.endsWith("/run-preview")) {
+    const id = path.split("/nodes/")[1].split("/")[0];
+    response.end(JSON.stringify(previewForGraph(graph, id)));
+    return;
+  }
   if (path.endsWith("/runs") && request.method === "POST") {
     const node = graph.nodes.find((node) =>
       path.includes(`/nodes/${node.id}/`),
     )!;
+    if (node.versions.length) {
+      response.writeHead(409).end(
+        JSON.stringify({
+          detail:
+            "This node already has an image. Continue editing to make a new node.",
+        }),
+      );
+      return;
+    }
     const job: RunJob = {
       id: crypto.randomUUID(),
       node_id: node.id,
@@ -200,7 +331,11 @@ createServer(async (request, response) => {
       completed_at: null,
     };
     node.run = job;
-    runs.set(job.id, { job, prompt: node.prompt });
+    runs.set(job.id, {
+      job,
+      prompt: node.prompt,
+      seed: node.seed ?? 1,
+    });
     response.writeHead(202).end(JSON.stringify(job));
     return;
   }
@@ -213,13 +348,39 @@ createServer(async (request, response) => {
     const node = {
       ...fixture().nodes[1],
       id: body.id,
-      title: "Untitled concept",
+      title: "Untitled node",
       prompt: "",
       document: [],
       position: body.position,
     };
     graph.nodes.push(node);
     response.writeHead(201).end(JSON.stringify(node));
+    return;
+  }
+  if (path.endsWith("/branches")) {
+    const imageId = path.split("/versions/")[1].split("/")[0];
+    const source = graph.nodes.find((node) =>
+      node.versions.some((image) => image.id === imageId),
+    )!;
+    const node = {
+      ...structuredClone(fixture().nodes[1]),
+      id: body.id,
+      title: "Untitled node",
+      document: [],
+      prompt: "",
+      position: body.position,
+    };
+    const edge = {
+      id: crypto.randomUUID(),
+      source_node_id: source.id,
+      target_node_id: node.id,
+      role: "subject" as const,
+      pin: { mode: "version" as const, version_id: imageId },
+      order: null,
+    };
+    graph.nodes.push(node);
+    graph.edges.push(edge);
+    response.writeHead(201).end(JSON.stringify({ node, edge }));
     return;
   }
   if (path.endsWith("/duplicate")) {
@@ -230,12 +391,35 @@ createServer(async (request, response) => {
       ...structuredClone(source),
       id: body.id,
       title: `${source.title} · copy`,
+      seed: body.fresh_seed ? randomInt(2 ** 32) : source.seed,
       position: body.position,
       versions: [],
       active_version_id: null,
       revision: 0,
       run: null,
     };
+    node.document = node.document.map((part) =>
+      part.type === "connect"
+        ? { ...part, edge_id: crypto.randomUUID() }
+        : part,
+    );
+    for (const edge of graph.edges.filter(
+      (edge) => edge.target_node_id === source.id,
+    )) {
+      graph.edges.push({
+        ...structuredClone(edge),
+        id:
+          edge.role === "connect"
+            ? node.document.flatMap((part) =>
+                part.type === "connect" &&
+                part.source_node_id === edge.source_node_id
+                  ? [part.edge_id]
+                  : [],
+              )[0]
+            : crypto.randomUUID(),
+        target_node_id: node.id,
+      });
+    }
     graph.nodes.push(node);
     response.writeHead(201).end(JSON.stringify(node));
     return;
@@ -248,6 +432,23 @@ createServer(async (request, response) => {
     response.writeHead(204).end();
     return;
   }
+  if (request.method === "PUT" && path.endsWith("/subject")) {
+    const id = path.split("/nodes/")[1].split("/")[0];
+    graph.edges = graph.edges.filter(
+      (edge) => edge.target_node_id !== id || edge.role !== "subject",
+    );
+    const edge = {
+      id: `subject-${id}`,
+      source_node_id: body.source_node_id,
+      target_node_id: id,
+      role: "subject" as const,
+      pin: { mode: "version" as const, version_id: body.version_id },
+      order: null,
+    };
+    graph.edges.push(edge);
+    response.end(JSON.stringify(edge));
+    return;
+  }
   if (request.method === "DELETE" && path.endsWith("/subject")) {
     const id = path.split("/nodes/")[1].split("/")[0];
     graph.edges = graph.edges.filter(
@@ -256,20 +457,29 @@ createServer(async (request, response) => {
     response.writeHead(204).end();
     return;
   }
-  if (path === "/artifacts/mesh.glb") {
+  if (path === "/artifacts/mesh.glb" || path === "/artifacts/grey-mesh.glb") {
     response.setHeader("Content-Type", "model/gltf-binary");
-    response.end(meshFixture());
+    response.end(meshFixture(path === "/artifacts/mesh.glb"));
     return;
   }
   if (path.endsWith("/mesh")) {
     const versionId = path.split("/versions/")[1].split("/")[0];
-    if (request.method === "POST" && !meshes.has(versionId))
+    const cached = meshes.get(versionId);
+    const texture = body?.texture ?? "standard";
+    if (
+      request.method === "POST" &&
+      (!cached ||
+        (cached.status === "complete" &&
+          cached.texture === "no" &&
+          texture === "standard" &&
+          cached.attempt_id !== body.attempt_id))
+    )
       meshes.set(versionId, {
         version_id: versionId,
         attempt_id: body.attempt_id,
         status: "complete",
-        texture: body.texture,
-        artifact_url: "http://127.0.0.1:8109/artifacts/mesh.glb",
+        texture,
+        artifact_url: `http://127.0.0.1:8109/artifacts/${texture === "no" ? "grey-mesh" : "mesh"}.glb`,
         preview_url: "http://127.0.0.1:8109/artifacts/subject.svg",
         elapsed_seconds: 42,
         error: null,
@@ -318,18 +528,6 @@ createServer(async (request, response) => {
     response.end("{}");
     return;
   }
-  if (path.endsWith("/visibility")) {
-    for (const node of graph.nodes)
-      for (const version of node.versions)
-        if (path.includes(`/versions/${version.id}/`)) {
-          version.hidden = body.hidden;
-          if (version.hidden && node.active_version_id === version.id)
-            node.active_version_id =
-              node.versions.findLast((item) => !item.hidden)?.id ?? null;
-        }
-    response.writeHead(204).end();
-    return;
-  }
   if (request.method === "PATCH" && path.includes("/nodes/")) {
     const node = graph.nodes.find((node) =>
       path.endsWith(`/nodes/${node.id}`),
@@ -342,6 +540,17 @@ createServer(async (request, response) => {
     }
     Object.assign(node, body, { revision: node.revision + 1 });
     response.end(JSON.stringify(node));
+    return;
+  }
+  if (path.startsWith("/artifacts/result-")) {
+    const id = path.slice("/artifacts/result-".length).replace(/\.svg$/, "");
+    const shade = runs.get(id)?.prompt.toLowerCase().includes("orange")
+      ? "#f97316"
+      : "#49505b";
+    response.setHeader("Content-Type", "image/svg+xml");
+    response.end(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360"><rect width="480" height="360" fill="#f5f1ea"/><path d="M170 100H310L340 190H140Z" fill="${shade}"/><path d="M240 190V285M200 285H280" stroke="#49505b" stroke-width="12"/></svg>`,
+    );
     return;
   }
   if (path === "/artifacts/subject.svg") {
@@ -388,7 +597,7 @@ createServer(async (request, response) => {
     return;
   }
   if (path.endsWith("/mask")) {
-    graph.nodes[1].mask = body;
+    targetNode!.mask = body;
     response.end(JSON.stringify(body));
     return;
   }

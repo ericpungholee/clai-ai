@@ -33,7 +33,6 @@ export type Version = {
   };
   prompt_at_runtime: string;
   edit_depth: number;
-  hidden: boolean;
   branch_node_ids: string[];
   masked_outside_change: number | null;
 };
@@ -57,7 +56,10 @@ export type PersistedGraphNode = {
 export type PromptPart =
   | { type: "text"; text: string }
   | { type: "connect"; edge_id: string; source_node_id: string };
+export type RunPreview = { op: Op };
+
 export type ConnectPreview = {
+  versionId: string | null;
   edgeId: string;
   nodeId: string;
   title: string;
@@ -89,6 +91,7 @@ export type GraphDocument = {
 };
 
 export type SubjectPreview = {
+  edgeId: string;
   nodeId: string;
   deleted: boolean;
   nodeTitle: string;
@@ -117,12 +120,20 @@ export type DesignNodeData = {
   run: NodeRunState;
   draftError: string | null;
   meshPreview: { versionId: string; url: string } | null;
+  previewMode: "image" | "mesh";
+  wireHighlighted?: boolean;
+  saveState: "saved" | "saving" | "failed";
+  highlightedWireId: string | null;
 } & Record<string, unknown>;
 
 export type WorkspaceEdgeData = (
   { role: "subject"; pin: VersionPin } | { role: "connect"; pin: ActivePin }
-) &
-  Record<string, unknown>;
+) & {
+  number: number;
+  state: "ready" | "empty" | "deleted";
+  highlighted?: boolean;
+  dimmed?: boolean;
+} & Record<string, unknown>;
 
 export type WorkspaceNode = Node<DesignNodeData, "design">;
 export type WorkspaceEdge = Edge<WorkspaceEdgeData>;
@@ -250,13 +261,18 @@ export async function duplicateDesignNode(
   projectId: string,
   nodeId: string,
   position: { x: number; y: number },
+  freshSeed = false,
 ): Promise<PersistedGraphNode> {
   return apiRequest(
     `${browserApiUrl}/api/projects/${projectId}/nodes/${nodeId}/duplicate`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: crypto.randomUUID(), position }),
+      body: JSON.stringify({
+        id: crypto.randomUUID(),
+        position,
+        fresh_seed: freshSeed,
+      }),
     },
   );
 }
@@ -325,21 +341,6 @@ export async function getCollapsePreview(
   );
 }
 
-export async function setVersionHidden(
-  projectId: string,
-  versionId: string,
-  hidden: boolean,
-): Promise<void> {
-  await apiRequest(
-    `${browserApiUrl}/api/projects/${projectId}/versions/${versionId}/visibility`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hidden }),
-    },
-  );
-}
-
 export async function submitRun(
   projectId: string,
   nodeId: string,
@@ -350,8 +351,20 @@ export async function submitRun(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idempotency_key: idempotencyKey }),
+      body: JSON.stringify({
+        idempotency_key: idempotencyKey,
+      }),
     },
+  );
+}
+
+export async function getRunPreview(
+  projectId: string,
+  nodeId: string,
+): Promise<RunPreview> {
+  return apiRequest(
+    `${browserApiUrl}/api/projects/${projectId}/nodes/${nodeId}/run-preview`,
+    { cache: "no-store" },
   );
 }
 
@@ -379,7 +392,7 @@ export function toWorkspaceGraph(graph: GraphDocument): {
       .map((edge) => [edge.target_node_id, edge]),
   );
 
-  return {
+  const workspace: { nodes: WorkspaceNode[]; edges: WorkspaceEdge[] } = {
     nodes: graph.nodes
       .filter((node) => !node.deleted)
       .map((node) => {
@@ -394,6 +407,7 @@ export function toWorkspaceGraph(graph: GraphDocument): {
         const subject =
           edge && source && pinned
             ? {
+                edgeId: edge.id,
                 nodeId: source.id,
                 deleted: source.deleted,
                 nodeTitle: source.title,
@@ -413,6 +427,9 @@ export function toWorkspaceGraph(graph: GraphDocument): {
             activeVersionId: node.active_version_id,
             versions: node.versions,
             meshPreview: null,
+            previewMode: "image",
+            saveState: "saved",
+            highlightedWireId: null,
             subject,
             mask: node.mask,
             document: node.document,
@@ -422,9 +439,10 @@ export function toWorkspaceGraph(graph: GraphDocument): {
               const source = nodesById.get(part.source_node_id);
               return [
                 {
+                  versionId: source?.active_version_id ?? null,
                   edgeId: part.edge_id,
                   nodeId: part.source_node_id,
-                  title: source?.title ?? "Deleted concept",
+                  title: source?.title ?? "Deleted reference",
                   state:
                     !source || source.deleted
                       ? "deleted"
@@ -443,10 +461,27 @@ export function toWorkspaceGraph(graph: GraphDocument): {
     edges: graph.edges
       .filter(
         (edge) =>
-          !nodesById.get(edge.source_node_id)?.deleted &&
+          edge.role === "subject" &&
           !nodesById.get(edge.target_node_id)?.deleted,
       )
-      .map(toWorkspaceEdge),
+      .map((edge) => ({
+        id: edge.id,
+        type: "role",
+        source: edge.source_node_id,
+        target: edge.target_node_id,
+        sourceHandle: "subject",
+        targetHandle: "subject",
+        data: {
+          role: "subject" as const,
+          pin: edge.pin as VersionPin,
+          number: 1,
+          state: "ready" as const,
+        },
+      })),
+  };
+  return {
+    nodes: workspace.nodes,
+    edges: workspaceWires(workspace.nodes, workspace.edges),
   };
 }
 
@@ -460,22 +495,74 @@ export function runDisplay(job: RunJob | null): NodeRunState {
   return { status: "running", job, startedAt: job.created_at };
 }
 
-function toWorkspaceEdge(edge: PersistedGraphEdge): WorkspaceEdge {
-  return {
-    id: edge.id,
-    source: edge.source_node_id,
-    target: edge.target_node_id,
-    sourceHandle: "source",
-    targetHandle: edge.role,
-    style:
-      edge.role === "subject"
-        ? { stroke: "#0284c7", strokeWidth: 2 }
-        : { stroke: "#a855f7", strokeWidth: 2, strokeDasharray: "5 4" },
-    data:
-      edge.role === "subject"
-        ? { role: "subject", pin: edge.pin }
-        : { role: "connect", pin: edge.pin },
-  };
+// Numbering follows compile_document: origin references start at 1; a subject
+// occupies image 1 on edit nodes. Derive wires from the same draft as the chips.
+export function referenceNumber(index: number, hasSubject: boolean): number {
+  return index + (hasSubject ? 2 : 1);
+}
+
+export function workspaceWires(
+  nodes: WorkspaceNode[],
+  edges: WorkspaceEdge[],
+): WorkspaceEdge[] {
+  const ids = new Set(nodes.map((node) => node.id));
+  return [
+    ...edges.filter(
+      (edge) =>
+        edge.data?.role === "subject" &&
+        ids.has(edge.source) &&
+        ids.has(edge.target),
+    ),
+    ...nodes.flatMap((target) =>
+      target.data.connects.map((ref, index): WorkspaceEdge => ({
+        id: ref.edgeId,
+        type: "role",
+        source: ids.has(ref.nodeId) ? ref.nodeId : target.id,
+        target: target.id,
+        sourceHandle: "connect",
+        targetHandle: "connect",
+        selected: edges.find((edge) => edge.id === ref.edgeId)?.selected,
+        data: {
+          role: "connect",
+          pin: { mode: "active" },
+          number: referenceNumber(index, !!target.data.subject),
+          state: ref.state,
+        },
+      })),
+    ),
+  ].map((edge) => ({
+    ...edge,
+    ariaLabel: `${edge.data?.role === "subject" ? "Input" : "Reference"} image ${edge.data?.number}`,
+    interactionWidth: 24,
+    zIndex: 5,
+  }));
+}
+
+export function nodeIsBlocked(data: DesignNodeData): boolean {
+  if (data.versions.length) return false;
+  const reason = runBlockingReason(data);
+  return (
+    !!reason && reason !== "Enter a prompt." && reason !== "Run in progress."
+  );
+}
+
+export function runBlockingReason(data: DesignNodeData): string | null {
+  if (data.remoteDeleted) return "Node deleted — copy this text to a new node.";
+  if (data.versions.length)
+    return "This result is frozen. Continue editing to make a new node.";
+  if (data.run.status === "running") return "Run in progress.";
+  if (data.connects.some((ref) => ref.state === "deleted"))
+    return "Source deleted — remove or replace this reference.";
+  if (data.connects.some((ref) => ref.state === "empty"))
+    return "Reference has no image — run its source first.";
+  if (data.mask && data.connects.length > 0)
+    return "Area selections can't be combined with references. Remove the selection first.";
+  if (data.mask && data.mask.subject_version_id !== data.subject?.versionId)
+    return "Area selection belongs to a different image. Select it again or remove it.";
+  if (data.draftError) return data.draftError;
+  if (data.prompt.length > 8000) return "Prompt exceeds 8,000 characters.";
+  if (!data.prompt.trim()) return "Enter a prompt.";
+  return null;
 }
 
 async function apiRequest<T>(input: string, init?: RequestInit): Promise<T> {

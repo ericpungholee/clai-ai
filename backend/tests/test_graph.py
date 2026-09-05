@@ -175,6 +175,10 @@ def test_white_background_defaults_for_new_nodes_and_freezes_per_version(
         "Place the object on a clean white background."
     )
 
+    node = client.post(
+        f"/api/projects/{project_id}/nodes/{node['id']}/duplicate",
+        json={"position": {"x": 0, "y": 850}},
+    ).json()
     settings = {**node["settings"], "whiteBackground": False}
     patched = client.patch(
         f"/api/projects/{project_id}/nodes/{node['id']}",
@@ -188,7 +192,11 @@ def test_white_background_defaults_for_new_nodes_and_freezes_per_version(
     assert provider.requests[-1].prompt_at_runtime == "A sculptural desk lamp"
 
     graph = client.get(f"/api/projects/{project_id}/graph").json()
-    versions = {version["id"]: version for version in graph["nodes"][0]["versions"]}
+    versions = {
+        version["id"]: version
+        for node in graph["nodes"]
+        for version in node["versions"]
+    }
     assert versions[str(first_version_id)]["params"]["whiteBackground"] is True
     assert versions[str(second_version_id)]["params"]["whiteBackground"] is False
     assert versions[str(first_version_id)]["prompt_at_runtime"].endswith(
@@ -335,6 +343,7 @@ def test_navy_shoe_acceptance_runs_real_pipeline_with_fake_provider(
     )
     assert wire.status_code == 200
     preview = client.get(f"/api/projects/{project_id}/nodes/{branch['id']}/run-preview")
+    assert preview.status_code == 200
     assert preview.json() == {"op": "edit_instruct"}
     with TestingSessionLocal() as db:
         assert (
