@@ -1,3 +1,4 @@
+import { createHash, randomInt } from "node:crypto";
 import { createServer } from "node:http";
 import type { GraphDocument, RunJob } from "../lib/graph.ts";
 import type { MeshData } from "../lib/meshes.ts";
@@ -9,6 +10,53 @@ const project = {
   updated_at: "2026-09-04T00:00:00Z",
   thumbnail_url: null,
 };
+function previewForGraph(graph: GraphDocument, nodeId: string) {
+  const node = graph.nodes.find((node) => node.id === nodeId)!;
+  const subject = graph.edges.find(
+    (edge) => edge.target_node_id === nodeId && edge.role === "subject",
+  );
+  let index = subject ? 2 : 1;
+  const prompt = node.document
+    .map((part) => (part.type === "text" ? part.text : `image ${index++}`))
+    .join("")
+    .trim();
+  const refs = node.document.flatMap((part) =>
+    part.type === "connect"
+      ? [
+          graph.nodes.find((source) => source.id === part.source_node_id)
+            ?.active_version_id ?? null,
+        ]
+      : [],
+  );
+  const mask =
+    node.mask && node.mask.rle === `1 ${node.mask.width * node.mask.height}`
+      ? null
+      : node.mask;
+  const op = subject
+    ? mask
+      ? "edit_inpaint"
+      : refs.length
+        ? "edit_ref_guided"
+        : "edit_instruct"
+    : refs.length
+      ? "generate_ref"
+      : "generate";
+  const run_signature = createHash("sha256")
+    .update(
+      JSON.stringify([
+        prompt,
+        op,
+        node.settings,
+        node.seed,
+        subject?.pin,
+        refs,
+        mask,
+      ]),
+    )
+    .digest("hex");
+  return { op, run_signature };
+}
+
 function fixture(): GraphDocument {
   const settings = {
     aspect_ratio: "1:1",
@@ -38,7 +86,7 @@ function fixture(): GraphDocument {
     branch_node_ids: ["target"],
     masked_outside_change: null,
   };
-  return {
+  const result: GraphDocument = {
     nodes: [
       {
         id: "source",
@@ -82,10 +130,19 @@ function fixture(): GraphDocument {
       },
     ],
   };
+  result.nodes[0].versions[0].run_signature = previewForGraph(
+    result,
+    "source",
+  ).run_signature;
+  return result;
 }
+
 let graph = fixture();
 const meshes = new Map<string, MeshData>();
-const runs = new Map<string, { job: RunJob; prompt: string }>();
+const runs = new Map<
+  string,
+  { job: RunJob; prompt: string; signature: string; seed: number }
+>();
 let projectDeleted = false;
 
 function meshFixture(): Buffer {
@@ -171,6 +228,8 @@ createServer(async (request, response) => {
         id: `result-${entry.job.id}`,
         node_id: node.id,
         prompt_at_runtime: entry.prompt,
+        run_signature: entry.signature,
+        seed: entry.seed,
         created_at: new Date().toISOString(),
         branch_node_ids: [],
       };
@@ -182,6 +241,11 @@ createServer(async (request, response) => {
     entry.job.completed_at = new Date().toISOString();
     node.run = entry.job;
     response.end("{}");
+    return;
+  }
+  if (path.endsWith("/run-preview")) {
+    const id = path.split("/nodes/")[1].split("/")[0];
+    response.end(JSON.stringify(previewForGraph(graph, id)));
     return;
   }
   if (path.endsWith("/runs") && request.method === "POST") {
@@ -200,7 +264,12 @@ createServer(async (request, response) => {
       completed_at: null,
     };
     node.run = job;
-    runs.set(job.id, { job, prompt: node.prompt });
+    runs.set(job.id, {
+      job,
+      prompt: node.prompt,
+      signature: previewForGraph(graph, node.id).run_signature,
+      seed: body.reroll ? randomInt(2 ** 32) : (node.seed ?? 1),
+    });
     response.writeHead(202).end(JSON.stringify(job));
     return;
   }

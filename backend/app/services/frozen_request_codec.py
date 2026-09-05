@@ -14,6 +14,7 @@ def encode_frozen_request(request: FrozenRunRequest) -> dict[str, object]:
     return {
         "node_id": request.node_id,
         "user_prompt": request.user_prompt,
+        "run_signature": request.run_signature,
         "op": request.op.value,
         "prompt_at_runtime": request.prompt_at_runtime,
         "seed": request.seed,
@@ -58,6 +59,7 @@ def decode_frozen_request(payload: Mapping[str, object]) -> FrozenRunRequest:
     return FrozenRunRequest(
         node_id=_string(payload, "node_id"),
         user_prompt=_optional_string(payload, "user_prompt") or "",
+        run_signature=_optional_string(payload, "run_signature"),
         op=Op(_string(payload, "op")),
         prompt_at_runtime=_string(payload, "prompt_at_runtime"),
         seed=_integer(payload, "seed"),

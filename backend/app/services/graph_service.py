@@ -396,6 +396,7 @@ def serialize_version(version: Version) -> VersionData:
         params=version.params,
         seed=version.seed,
         input_snapshot=version.input_snapshot,
+        run_signature=version.input_snapshot.get("run_signature"),
         prompt_at_runtime=version.prompt_at_runtime,
         edit_depth=version.edit_depth,
     )

@@ -191,6 +191,11 @@ def _commit_version(
                 "subject_version_id": request.input_snapshot.subject_version_id,
                 "connect_version_ids": list(request.input_snapshot.connect_version_ids),
                 "mask_hash": request.input_snapshot.mask_hash,
+                **(
+                    {"run_signature": request.run_signature}
+                    if request.run_signature
+                    else {}
+                ),
             },
             prompt_at_runtime=request.prompt_at_runtime,
             edit_depth=request.edit_depth,

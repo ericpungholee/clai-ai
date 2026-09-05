@@ -36,6 +36,7 @@ def submit_run(
     idempotency_key: str,
     db: Session,
     random_seed: Callable[[], int] | None = None,
+    reroll: bool = False,
 ) -> tuple[RunJob, bool]:
     target_row = _lock_target(project_id, node_id, db)
     existing = db.scalar(
@@ -66,6 +67,10 @@ def submit_run(
     frozen = _freeze_node_run(
         target_row, db, random_seed or (lambda: secrets.randbits(32))
     )
+    if reroll:
+        # A deliberate re-roll changes only this submission's resolved seed.
+        # Explicit draft settings and their signature remain unchanged.
+        frozen = replace(frozen, seed=(random_seed or (lambda: secrets.randbits(32)))())
     job = RunJob(
         id=uuid.uuid4(),
         project_id=project_id,
@@ -81,9 +86,11 @@ def submit_run(
     return job, True
 
 
-def preview_run(*, project_id: uuid.UUID, node_id: uuid.UUID, db: Session) -> str:
+def preview_run(
+    *, project_id: uuid.UUID, node_id: uuid.UUID, db: Session
+) -> FrozenRunRequest:
     target = _lock_target(project_id, node_id, db)
-    return _freeze_node_run(target, db, lambda: 0).op.value
+    return _freeze_node_run(target, db, lambda: 0)
 
 
 def _lock_target(project_id: uuid.UUID, node_id: uuid.UUID, db: Session) -> GraphNode:

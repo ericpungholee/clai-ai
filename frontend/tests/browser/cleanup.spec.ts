@@ -31,6 +31,189 @@ test.beforeEach(async ({ request }) => {
   await request.post(`${api}/reset`);
 });
 
+test("settled Run responds to draft inputs after saves and completed runs", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/projects/fixture-project");
+  const source = node(page, "source");
+  const run = source.getByRole("button", { name: "Run", exact: true });
+  const prompt = source.getByRole("textbox", { name: "Design prompt" });
+  await expect(run).toBeDisabled();
+  await expect(run).toHaveAttribute(
+    "title",
+    "No changes since v1. Edit the prompt or change an input.",
+  );
+  let previews = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/nodes/source/run-preview")) previews++;
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/nodes/source/prompt", async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await prompt.fill("A copper lamp");
+  await expect(run).toBeEnabled();
+  await expect(source.getByRole("status", { name: "Saving…" })).toBeVisible();
+  expect(previews).toBe(0);
+  release();
+  await expect.poll(() => previews).toBeGreaterThan(0);
+  await prompt.fill("A lamp");
+  await expect(run).toBeDisabled();
+  await source
+    .getByRole("textbox", { name: "Node title" })
+    .fill("Renamed lamp");
+  await expect(run).toBeDisabled();
+  await source.getByRole("button", { name: "White bg" }).click();
+  await expect(run).toBeEnabled();
+  await run.click();
+  await expect(
+    source.getByRole("status").filter({ hasText: "Queued" }),
+  ).toBeVisible();
+  await request.post(`${api}/finish-run`);
+  await expect(run).toBeDisabled();
+  await expect(run).toHaveAttribute(
+    "title",
+    "No changes since v2. Edit the prompt or change an input.",
+  );
+  // The original active version has different settings and must unlock Run.
+  await source
+    .getByRole("button", { name: "Select version 1", exact: true })
+    .click();
+  await expect(run).toBeEnabled();
+});
+
+test("Run again confirms references, freezes a fresh seed, and unlocks their inputs", async ({
+  page,
+  request,
+}) => {
+  await reference(request);
+  await request.post(`${nodeUrl}/runs`, {
+    data: { idempotency_key: "initial" },
+  });
+  await request.post(`${api}/finish-run`);
+  await page.goto("/projects/fixture-project");
+  const targetRun = node(page).getByRole("button", {
+    name: "Run",
+    exact: true,
+  });
+  await expect(targetRun).toBeDisabled();
+  await menu(page, "source", "Run again");
+  await expect(page.getByRole("dialog")).toContainText(
+    'Run again? "Desk lamp" feeds 1 node, and they will follow the new image.',
+  );
+  await expect(
+    page.getByRole("dialog").getByRole("button", { name: "Cancel" }),
+  ).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(
+    node(page, "source").getByRole("button", { name: "Run", exact: true }),
+  ).toBeDisabled();
+  await menu(page, "source", "Run again");
+  const submitted = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      request.url().endsWith("/nodes/source/runs"),
+  );
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Run again" })
+    .click();
+  expect((await submitted).postDataJSON()).toMatchObject({ reroll: true });
+  await expect(
+    node(page, "source").getByRole("status").filter({ hasText: "Queued" }),
+  ).toBeVisible();
+  await request.post(`${api}/finish-run`);
+  await expect(targetRun).toBeEnabled();
+  await expect(
+    node(page, "source").getByRole("button", { name: "Run", exact: true }),
+  ).toBeDisabled();
+  const source = (await (await request.get(graphUrl)).json()).nodes[0];
+  expect(source.seed).toBe(1);
+  expect(source.versions[1].seed).not.toBe(source.versions[0].seed);
+  expect(source.versions[1].run_signature).toBe(
+    source.versions[0].run_signature,
+  );
+});
+
+test("pinned subjects do not trigger reroll confirmation and selection stays neutral", async ({
+  page,
+}) => {
+  await page.goto("/projects/fixture-project");
+  const card = node(page, "source").locator(".design-card");
+  await node(page, "source").click({ position: { x: 2, y: 40 } });
+  await expect(card).toHaveAttribute("data-selected", "true");
+  await expect(card).toHaveCSS("border-color", "rgb(38, 38, 38)");
+  await expect(card).toHaveCSS("outline-style", "none");
+  await menu(page, "source", "Run again");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    node(page, "source").getByRole("status").filter({ hasText: "Queued" }),
+  ).toBeVisible();
+});
+
+test("a pending reference selection cannot cache an old preview or freeze the old image", async ({
+  page,
+  request,
+}) => {
+  await request.post(`${api}/many-versions`);
+  await reference(request);
+  await request.post(`${nodeUrl}/runs`, {
+    data: { idempotency_key: "initial" },
+  });
+  await request.post(`${api}/finish-run`);
+  await page.goto("/projects/fixture-project");
+  const run = node(page).getByRole("button", { name: "Run", exact: true });
+  await expect(run).toBeDisabled();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let previews = 0;
+  let submitted = false;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/nodes/target/run-preview")) previews++;
+    if (request.url().endsWith("/nodes/target/runs")) submitted = true;
+  });
+  await page.route("**/nodes/source", async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await node(page, "source")
+    .getByRole("button", { name: "Select version 1", exact: true })
+    .click();
+  await expect(run).toBeEnabled();
+  await run.click();
+  // Let the target's flush complete while the upstream selection is held.
+  await expect(
+    node(page).getByRole("status", { name: "Saved", exact: true }),
+  ).toBeVisible();
+  await page.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      ),
+  );
+  expect(previews).toBe(0);
+  expect(submitted).toBe(false);
+  release();
+  await expect(
+    node(page).getByRole("status").filter({ hasText: "Queued" }),
+  ).toBeVisible();
+  await request.post(`${api}/finish-run`);
+  await expect(run).toBeDisabled();
+  const graph = await (await request.get(graphUrl)).json();
+  const preview = await (await request.get(`${nodeUrl}/run-preview`)).json();
+  expect(graph.nodes[0].active_version_id).toBe("subject");
+  expect(graph.nodes[1].versions.at(-1).run_signature).toBe(
+    preview.run_signature,
+  );
+});
+
 test("wire roles use separate endpoints, shapes, numbers and linked hover", async ({
   page,
   request,
@@ -41,7 +224,8 @@ test("wire roles use separate endpoints, shapes, numbers and linked hover", asyn
   const ref = page.locator('.react-flow__edge[data-id="reference"]');
   await expect(subject).toBeVisible();
   await expect(ref).toBeVisible();
-  for (const id of ["source", "target"]) {
+  await expect(node(page).locator(".subject-dock")).toHaveCSS("height", "24px");
+  for (const id of ["source"]) {
     const metrics = await node(page, id).evaluate((element) => {
       const card = element
         .querySelector(".design-card")!
@@ -58,6 +242,21 @@ test("wire roles use separate endpoints, shapes, numbers and linked hover", asyn
     expect(metrics[0]).toBeCloseTo(0.35, 2);
     expect(metrics[1]).toBeCloseTo(0.7, 2);
   }
+  const anchors = await node(page).evaluate((element) => {
+    const center = (selector: string) => {
+      const rect = element.querySelector(selector)!.getBoundingClientRect();
+      return rect.y + rect.height / 2;
+    };
+    return {
+      subject: center(".wire-subject.target"),
+      chip: center(".subject-chip"),
+      reference: center(".wire-reference.target"),
+      prompt: center(".prompt-anchor"),
+    };
+  });
+  expect(anchors.subject).toBeCloseTo(anchors.chip, 0);
+  expect(anchors.reference).toBeCloseTo(anchors.prompt, 0);
+  expect(anchors.subject).toBeLessThan(anchors.reference);
   await expect(subject.locator(".react-flow__edge-path")).toHaveCSS(
     "stroke-width",
     "2.5px",
@@ -80,8 +279,17 @@ test("wire roles use separate endpoints, shapes, numbers and linked hover", asyn
   await expect(subject.locator("g").first()).toHaveCSS("opacity", "0.25");
   await page.locator('[data-wire-id="reference"]').hover();
   await expect(chip).toHaveAttribute("data-highlighted", "true");
-  await expect(node(page, "source")).toHaveCSS("outline-width", "2px");
-  await expect(node(page)).toHaveCSS("outline-width", "2px");
+  for (const id of ["source", "target"]) {
+    await expect(node(page, id).locator(".design-card")).toHaveAttribute(
+      "data-wire-highlighted",
+      "true",
+    );
+    await expect(node(page, id)).toHaveCSS("outline-style", "none");
+    await expect(node(page, id).locator(".design-card")).toHaveCSS(
+      "border-color",
+      "rgb(212, 212, 212)",
+    );
+  }
   await expect(node(page, "source").locator(".design-card")).toHaveAttribute(
     "data-kind",
     "origin",
@@ -263,9 +471,7 @@ test("single retained version can be hidden and restored through keyboard menus"
     .getByRole("button", { name: "Node actions" })
     .focus();
   await page.keyboard.press("Enter");
-  await expect(
-    page.getByRole("button", { name: "Duplicate draft" }),
-  ).toBeFocused();
+  await expect(page.getByRole("button", { name: "Run again" })).toBeFocused();
   await page.getByRole("button", { name: "Hide version 1" }).click();
   await expect(
     node(page, "source").getByRole("button", { name: "Show retained" }),
@@ -330,6 +536,19 @@ test("handles connect by keyboard and switch origin into edit", async ({
   await expect(
     node(page).getByRole("button", { name: "White bg" }),
   ).toHaveCount(0);
+  await node(page, "source").hover();
+  await node(page, "source")
+    .getByRole("button", { name: "Start subject" })
+    .dragTo(node(page).getByRole("button", { name: "Connect subject" }));
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+  await node(page, "source").hover();
+  await node(page, "source")
+    .getByRole("button", { name: "Start reference" })
+    .dragTo(node(page).getByRole("button", { name: "Connect reference" }));
+  await expect(page.locator(".react-flow__edge")).toHaveCount(2);
+  await expect(
+    node(page).getByRole("button", { name: "Image 2: Desk lamp" }),
+  ).toBeVisible();
 });
 
 test("multi-select deletes once and in-flight runs keep their frozen job", async ({
@@ -373,6 +592,7 @@ test("a running job with a stale mask adds only one warning line", async ({
   request,
 }) => {
   await page.goto("/projects/fixture-project");
+  await expect(node(page).locator(".subject-dock")).toHaveCSS("height", "24px");
   const before = (await node(page).boundingBox())!.height;
   await request.put(`${nodeUrl}/mask`, {
     data: {
@@ -386,6 +606,7 @@ test("a running job with a stale mask adds only one warning line", async ({
     data: { idempotency_key: "stale-run" },
   });
   await page.reload();
+  await expect(node(page).locator(".subject-dock")).toHaveCSS("height", "24px");
   await expect(node(page).getByRole("alert")).toHaveCount(1);
   await expect(node(page).getByRole("alert")).toContainText(
     "Different subject version",

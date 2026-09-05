@@ -37,18 +37,29 @@ export function RoleEdge({
         <BaseEdge
           id={id}
           path={path}
-          interactionWidth={24}
+          interactionWidth={0}
           style={{
+            pointerEvents: "none",
             stroke: color,
             strokeWidth: active ? 3.5 : subject ? 2.5 : 1.5,
             strokeDasharray: broken || !subject ? "6 4" : undefined,
           }}
+        />
+        {/* Keep the large wire hit area away from the draggable handles. */}
+        <path
+          className="react-flow__edge-interaction"
+          d={`M ${sx + 16},${sy} C ${sx + offset},${sy} ${targetX - offset},${targetY} ${targetX - 16},${targetY}`}
+          fill="none"
+          stroke="transparent"
+          strokeWidth={24}
+          style={{ pointerEvents: "stroke" }}
         />
         <path
           d={`M ${targetX - 13} ${targetY - 5} L ${targetX - 6} ${targetY} L ${targetX - 13} ${targetY + 5}${subject ? " Z" : ""}`}
           fill={subject ? color : "none"}
           stroke={color}
           strokeWidth="1.5"
+          style={{ pointerEvents: "none" }}
         />
         {[
           { x: sx, y: sy },

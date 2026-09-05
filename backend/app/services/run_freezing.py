@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable, Mapping, Sequence
 from hashlib import sha256
 
@@ -53,7 +54,35 @@ def freeze_run_request(
         connect_count=len(resolved.connects),
     )
 
+    snapshot = InputSnapshot(
+        subject_version_id=resolved.subject.id if resolved.subject else None,
+        connect_version_ids=tuple(version.id for version in resolved.connects),
+        mask_hash=hash_mask(resolved.mask),
+    )
+    signature = sha256(
+        json.dumps(
+            {
+                "user_prompt": target.prompt.strip(),
+                "op": op.value,
+                "settings": {
+                    "aspect_ratio": target.settings.aspect_ratio,
+                    "width": target.settings.width,
+                    "height": target.settings.height,
+                    "whiteBackground": target.settings.white_background,
+                },
+                "explicit_seed": target.seed,
+                "subject_version_id": snapshot.subject_version_id,
+                "connect_version_ids": snapshot.connect_version_ids,
+                "mask_hash": snapshot.mask_hash,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode()
+    ).hexdigest()
+
     return FrozenRunRequest(
+        run_signature=signature,
         node_id=target.id,
         user_prompt=target.prompt,
         op=op,
@@ -67,10 +96,6 @@ def freeze_run_request(
         subject=resolved.subject,
         connects=resolved.connects,
         mask=resolved.mask,
-        input_snapshot=InputSnapshot(
-            subject_version_id=resolved.subject.id if resolved.subject else None,
-            connect_version_ids=tuple(version.id for version in resolved.connects),
-            mask_hash=hash_mask(resolved.mask),
-        ),
+        input_snapshot=snapshot,
         edit_depth=calculate_edit_depth(op=op, subject=resolved.subject),
     )

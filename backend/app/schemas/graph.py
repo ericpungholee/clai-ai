@@ -36,6 +36,7 @@ class VersionData(BaseModel):
     seed: int
     input_snapshot: dict[str, JsonValue]
     prompt_at_runtime: str
+    run_signature: str | None = None
     edit_depth: int
     hidden: bool = False
     branch_node_ids: list[uuid.UUID] = Field(default_factory=list)
@@ -162,10 +163,12 @@ class BranchData(BaseModel):
 
 class RunPreviewData(BaseModel):
     op: Op
+    run_signature: str
 
 
 class RunSubmit(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=120)
+    reroll: bool = False
 
 
 class RunJobData(BaseModel):

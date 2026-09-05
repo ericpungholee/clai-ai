@@ -93,26 +93,58 @@ a {
   --wire-reference: #9561b5;
   --wire-error: #dc2626;
   --wire-handle-size: 9px;
-  --wire-handle-radius: calc(var(--wire-handle-size) / 2);
+  --wire-handle-stroke: 1.5px;
+  --wire-handle-radius: calc(
+    (var(--wire-handle-size) - var(--wire-handle-stroke)) / 2
+  );
+  --wire-subject-fallback-position: 30%;
   --wire-subject-position: 35%;
   --wire-reference-position: 70%;
 }
 .design-card {
   position: relative;
+  border: 1px solid #d4d4d4;
+  box-shadow: 0 1px 2px #0001;
 }
-.design-card::before {
-  content: "";
-  position: absolute;
-  pointer-events: none;
-  inset: 0 auto 0 -1px;
-  width: 3px;
-  border-radius: 6px 0 0 6px;
-  background: var(--wire-subject);
+.design-card:hover,
+.design-card[data-wire-highlighted="true"] {
+  box-shadow: 0 3px 10px #0002;
+}
+.design-card[data-selected="true"] {
+  border: 1.5px solid #262626;
+  box-shadow: 0 3px 10px #0002;
+}
+.design-card[data-blocked="true"] {
+  border: 1.5px solid var(--wire-error);
+}
+.node-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+.subject-dock {
+  position: relative;
+  height: 0;
   opacity: 0;
-  transition: opacity 150ms;
+  margin-left: -10px;
+  margin-bottom: -8px;
+  transition:
+    height 150ms,
+    opacity 150ms,
+    margin-bottom 150ms;
 }
-.design-card[data-kind="edit"]::before {
+.subject-dock[data-connected="true"] {
+  height: 24px;
   opacity: 1;
+  margin-bottom: 0;
+}
+.subject-dock[data-connected="false"] {
+  overflow: hidden;
+  pointer-events: none;
+}
+.subject-chip {
+  background: #fafafa;
 }
 .react-flow__handle.wire-handle {
   width: var(--wire-handle-size);
@@ -120,17 +152,31 @@ a {
   min-width: 0;
   min-height: 0;
   opacity: 0;
-  border-width: 1.5px;
+  border-width: var(--wire-handle-stroke);
 }
 .react-flow__handle.wire-subject {
-  top: var(--wire-subject-position);
   border-color: var(--wire-subject);
   background: var(--wire-subject);
 }
 .react-flow__handle.wire-reference {
-  top: var(--wire-reference-position);
   border-color: var(--wire-reference);
   background: white;
+}
+.react-flow__handle.wire-subject.source {
+  top: var(--wire-subject-position);
+}
+.react-flow__handle.wire-reference.source {
+  top: var(--wire-reference-position);
+}
+.react-flow__handle.subject-fallback {
+  top: var(--wire-subject-fallback-position);
+}
+.subject-anchor .react-flow__handle.target {
+  top: 50%;
+  left: 10px;
+}
+.prompt-anchor .react-flow__handle.target {
+  top: 50%;
 }
 .design-card:hover .wire-handle.available:not([data-dragging]),
 .wire-handle.available:focus-visible,
@@ -139,6 +185,9 @@ a {
 }
 .wire-endpoint {
   r: var(--wire-handle-radius);
+}
+.react-flow__edgelabel-renderer {
+  z-index: 6;
 }
 .icon-button {
   display: inline-flex;
@@ -159,7 +208,7 @@ a {
 button:focus-visible,
 summary:focus-visible,
 .prompt-chip:focus-visible {
-  outline: 2px solid var(--wire-subject);
+  outline: 2px solid #262626;
   outline-offset: 2px;
 }
 .overflow-menu-content {
@@ -273,10 +322,11 @@ summary:focus-visible,
   outline-color: var(--wire-subject);
 }
 @media (prefers-reduced-motion: reduce) {
-  .design-card::before,
+  .subject-dock,
   .preview-toolbar,
   .thumbnail-menu {
     transition: none;
+    animation: none;
   }
 }
 

@@ -32,6 +32,7 @@ export type Version = {
     mask_hash: string | null;
   };
   prompt_at_runtime: string;
+  run_signature?: string | null;
   edit_depth: number;
   hidden: boolean;
   branch_node_ids: string[];
@@ -57,7 +58,10 @@ export type PersistedGraphNode = {
 export type PromptPart =
   | { type: "text"; text: string }
   | { type: "connect"; edge_id: string; source_node_id: string };
+export type RunPreview = { op: Op; run_signature: string };
+
 export type ConnectPreview = {
+  versionId: string | null;
   edgeId: string;
   nodeId: string;
   title: string;
@@ -119,6 +123,8 @@ export type DesignNodeData = {
   draftError: string | null;
   meshPreview: { versionId: string; url: string } | null;
   previewMode: "image" | "mesh";
+  runPreview: { key: string; signature: string } | null;
+  wireHighlighted?: boolean;
   saveState: "saved" | "saving" | "failed";
   highlightedWireId: string | null;
 } & Record<string, unknown>;
@@ -352,14 +358,28 @@ export async function submitRun(
   projectId: string,
   nodeId: string,
   idempotencyKey: string,
+  reroll = false,
 ): Promise<RunJob> {
   return apiRequest(
     `${browserApiUrl}/api/projects/${projectId}/nodes/${nodeId}/runs`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idempotency_key: idempotencyKey }),
+      body: JSON.stringify({
+        idempotency_key: idempotencyKey,
+        ...(reroll ? { reroll: true } : {}),
+      }),
     },
+  );
+}
+
+export async function getRunPreview(
+  projectId: string,
+  nodeId: string,
+): Promise<RunPreview> {
+  return apiRequest(
+    `${browserApiUrl}/api/projects/${projectId}/nodes/${nodeId}/run-preview`,
+    { cache: "no-store" },
   );
 }
 
@@ -423,6 +443,7 @@ export function toWorkspaceGraph(graph: GraphDocument): {
             versions: node.versions,
             meshPreview: null,
             previewMode: "image",
+            runPreview: null,
             saveState: "saved",
             highlightedWireId: null,
             subject,
@@ -434,6 +455,7 @@ export function toWorkspaceGraph(graph: GraphDocument): {
               const source = nodesById.get(part.source_node_id);
               return [
                 {
+                  versionId: source?.active_version_id ?? null,
                   edgeId: part.edge_id,
                   nodeId: part.source_node_id,
                   title: source?.title ?? "Deleted concept",
@@ -528,7 +550,43 @@ export function workspaceWires(
     ...edge,
     ariaLabel: `${edge.data?.role === "subject" ? "Subject" : "Reference"} image ${edge.data?.number}`,
     interactionWidth: 24,
+    zIndex: 5,
   }));
+}
+
+// This is only a cache/invalidation key. Input equivalence is decided by the
+// backend signature, never by reconstructing the compiled prompt in the client.
+export function runInputKey(data: DesignNodeData): string {
+  return JSON.stringify([
+    data.document,
+    data.settings,
+    data.seed,
+    data.subject?.versionId ?? null,
+    data.connects.map((ref) => [ref.nodeId, ref.versionId, ref.state]),
+    data.mask,
+  ]);
+}
+
+export function settledRunReason(data: DesignNodeData): string | null {
+  const index = data.versions.findIndex(
+    (version) => version.id === data.activeVersionId,
+  );
+  const signature = data.versions[index]?.run_signature;
+  if (
+    data.run.status === "running" ||
+    !signature ||
+    data.runPreview?.signature !== signature ||
+    data.runPreview.key !== runInputKey(data)
+  )
+    return null;
+  return `No changes since v${index + 1}. Edit the prompt or change an input.`;
+}
+
+export function nodeIsBlocked(data: DesignNodeData): boolean {
+  const reason = runBlockingReason(data);
+  return (
+    !!reason && reason !== "Enter a prompt." && reason !== "Run in progress."
+  );
 }
 
 export function runBlockingReason(data: DesignNodeData): string | null {

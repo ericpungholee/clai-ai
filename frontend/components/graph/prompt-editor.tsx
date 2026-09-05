@@ -85,6 +85,7 @@ export function PromptEditor({
   hasSubject,
   highlightedWireId,
   footer,
+  referenceHandle,
   onChange,
   onHover,
   onJump,
@@ -97,6 +98,7 @@ export function PromptEditor({
   hasSubject: boolean;
   highlightedWireId: string | null;
   footer: ReactNode;
+  referenceHandle: ReactNode;
   onChange: (document: PromptPart[]) => void;
   onHover: (id: string | null) => void;
   onJump: (id: string) => void;
@@ -272,7 +274,8 @@ export function PromptEditor({
       candidate.title.toLowerCase().includes(query.toLowerCase()),
   );
   return (
-    <div className="nodrag nowheel relative rounded-lg border border-neutral-200 bg-white focus-within:border-blue-400">
+    <div className="prompt-anchor nodrag nowheel relative rounded-lg border border-neutral-200 bg-white focus-within:border-neutral-600">
+      {referenceHandle}
       <div
         ref={editor}
         role="textbox"

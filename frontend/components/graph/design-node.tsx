@@ -1,8 +1,13 @@
 import type { NodeProps } from "@xyflow/react";
-import { memo } from "react";
-import { runBlockingReason, type WorkspaceNode } from "@/lib/graph";
+import { memo, useState } from "react";
+import {
+  runBlockingReason,
+  settledRunReason,
+  type WorkspaceNode,
+  type DesignNodeData,
+} from "@/lib/graph";
 import { useDesignNodeActions } from "./design-node-actions";
-import { NodeFrame } from "./node-frame";
+import { NodeFrame, NodeHandle } from "./node-frame";
 import { PromptEditor } from "./prompt-editor";
 import { VersionStrip } from "./version-strip";
 import { RunProgress } from "./run-progress";
@@ -28,6 +33,7 @@ export const DesignNode = memo(function DesignNode({
     ? meshPreview.url
     : (activeVersion?.artifact_url ?? data.subject?.artifactUrl);
   const blocked = runBlockingReason(data);
+  const settled = settledRunReason(data);
   const failed = data.run.status === "failed";
   const warning = data.draftError
     ? "Draft changed — choose which to keep."
@@ -39,7 +45,7 @@ export const DesignNode = memo(function DesignNode({
   const preservation = activeVersion?.masked_outside_change;
   const saveState = data.draftError ? "failed" : data.saveState;
   const run = () => {
-    if (!blocked) actions.runNode(id);
+    if (!blocked && !settled) actions.runNode(id);
   };
 
   return (
@@ -62,6 +68,14 @@ export const DesignNode = memo(function DesignNode({
         <>
           <SaveStatus state={saveState} />
           <OverflowMenu label="Node actions">
+            {!blocked ? (
+              <button
+                aria-label="Run again"
+                onClick={() => actions.runAgain(id)}
+              >
+                Run again
+              </button>
+            ) : null}
             <button
               aria-label="Duplicate draft"
               onClick={() => actions.duplicateNode(id)}
@@ -246,37 +260,7 @@ export const DesignNode = memo(function DesignNode({
           </div>
         </div>
       ) : null}
-      {data.subject ? (
-        <button
-          className={`nodrag subject-chip flex w-full items-center gap-2 rounded px-1 py-0.5 text-left ${data.subject.deleted ? "opacity-50" : ""}`}
-          aria-label={`Inspect ${data.subject.nodeTitle}`}
-          title={
-            data.subject.deleted
-              ? "Source node deleted; pinned image retained"
-              : data.subject.nodeTitle
-          }
-          onClick={() => actions.viewVersions([data.subject!.versionId])}
-          onMouseEnter={() => actions.hoverWire(data.subject!.edgeId)}
-          onMouseLeave={() => actions.hoverWire(null)}
-          onFocus={() => actions.hoverWire(data.subject!.edgeId)}
-          onBlur={() => actions.hoverWire(null)}
-          data-highlighted={
-            data.highlightedWireId === data.subject.edgeId || undefined
-          }
-        >
-          <span className="wire-number subject-number">1</span>
-          <ArtifactImage
-            alt=""
-            className="h-5 w-5 shrink-0 rounded object-cover"
-            src={data.subject.artifactUrl}
-          />
-          <span
-            className={`truncate text-xs text-neutral-600 ${data.subject.deleted ? "line-through" : ""}`}
-          >
-            {data.subject.nodeTitle}
-          </span>
-        </button>
-      ) : null}
+      <SubjectRow id={id} data={data} />
       {warning ? (
         <div
           role="alert"
@@ -311,7 +295,7 @@ export const DesignNode = memo(function DesignNode({
               aria-label="Retry"
               title={blocked ?? "Retry"}
               disabled={!!blocked}
-              onClick={run}
+              onClick={() => (settled ? actions.runAgain(id) : run())}
             >
               Retry
             </button>
@@ -319,6 +303,9 @@ export const DesignNode = memo(function DesignNode({
         </div>
       ) : null}
       <PromptEditor
+        referenceHandle={
+          <NodeHandle data={data} id={id} role="connect" type="target" />
+        }
         document={data.document}
         connects={data.connects}
         hasSubject={hasSubject}
@@ -349,9 +336,9 @@ export const DesignNode = memo(function DesignNode({
               ) : null}
               <button
                 className="nodrag rounded bg-neutral-900 px-3 py-1 text-xs font-semibold text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-300"
-                disabled={!!blocked}
-                title={blocked ?? "Run"}
-                onClick={run}
+                disabled={!!blocked || !!settled}
+                title={blocked ?? settled ?? "Run"}
+                onClick={() => (settled ? actions.runAgain(id) : run())}
                 type="button"
               >
                 Run
@@ -383,4 +370,54 @@ function ArtifactImage({
   // Artifact hosts are runtime-configured.
   // eslint-disable-next-line @next/next/no-img-element
   return <img alt={alt} className={className} draggable={false} src={src} />;
+}
+
+function SubjectRow({ id, data }: { id: string; data: DesignNodeData }) {
+  const actions = useDesignNodeActions();
+  const [retained, setRetained] = useState(data.subject);
+  if (data.subject && retained !== data.subject) setRetained(data.subject);
+  const subject = data.subject ?? retained;
+  return (
+    <div
+      className="subject-dock subject-anchor"
+      data-connected={!!data.subject}
+      aria-hidden={!data.subject}
+      inert={!data.subject}
+    >
+      {data.subject ? (
+        <NodeHandle data={data} id={id} role="subject" type="target" />
+      ) : null}
+      {subject ? (
+        <button
+          className={`nodrag subject-chip flex h-6 w-full items-center gap-2 rounded-r pl-6 pr-1 text-left ${subject.deleted ? "opacity-50" : ""}`}
+          aria-label={`Inspect ${subject.nodeTitle}`}
+          title={
+            subject.deleted
+              ? "Source node deleted; pinned image retained"
+              : subject.nodeTitle
+          }
+          onClick={() => actions.viewVersions([subject.versionId])}
+          onMouseEnter={() => actions.hoverWire(subject.edgeId)}
+          onMouseLeave={() => actions.hoverWire(null)}
+          onFocus={() => actions.hoverWire(subject.edgeId)}
+          onBlur={() => actions.hoverWire(null)}
+          data-highlighted={
+            data.highlightedWireId === subject.edgeId || undefined
+          }
+        >
+          <span className="wire-number subject-number">1</span>
+          <ArtifactImage
+            alt=""
+            className="h-5 w-5 shrink-0 rounded object-cover"
+            src={subject.artifactUrl}
+          />
+          <span
+            className={`truncate text-xs text-neutral-600 ${subject.deleted ? "line-through" : ""}`}
+          >
+            {subject.nodeTitle}
+          </span>
+        </button>
+      ) : null}
+    </div>
+  );
 }

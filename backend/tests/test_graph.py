@@ -335,7 +335,10 @@ def test_navy_shoe_acceptance_runs_real_pipeline_with_fake_provider(
     )
     assert wire.status_code == 200
     preview = client.get(f"/api/projects/{project_id}/nodes/{branch['id']}/run-preview")
-    assert preview.json() == {"op": "edit_instruct"}
+    assert preview.status_code == 200
+    signature = preview.json()["run_signature"]
+    assert len(signature) == 64
+    assert preview.json() == {"op": "edit_instruct", "run_signature": signature}
     with TestingSessionLocal() as db:
         assert (
             db.scalar(
@@ -382,7 +385,16 @@ def test_navy_shoe_acceptance_runs_real_pipeline_with_fake_provider(
         "subject_version_id": str(subject_version_id),
         "connect_version_ids": [],
         "mask_hash": None,
+        "run_signature": signature,
     }
+    assert target["versions"][0]["run_signature"] == signature
+    assert provider.requests[-1].run_signature == signature
+    assert (
+        client.get(
+            f"/api/projects/{project_id}/nodes/{branch['id']}/run-preview"
+        ).json()["run_signature"]
+        != signature
+    )
     with TestingSessionLocal() as db:
         metric = db.get(VersionMetric, navy_version_id)
         assert metric is not None

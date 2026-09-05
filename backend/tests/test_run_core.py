@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from dataclasses import replace
 
 import pytest
 
@@ -392,6 +393,104 @@ def test_valid_mask_is_hashed_into_frozen_provenance() -> None:
     assert request.op is Op.EDIT_INPAINT
     assert request.input_snapshot.mask_hash is not None
     assert len(request.input_snapshot.mask_hash) == 64
+
+
+def test_run_signature_tracks_resolved_inputs_and_preserves_reference_order() -> None:
+    target = NodeSnapshot(id="target", prompt="image 2 with image 3 details")
+    sources = {
+        name: NodeSnapshot(id=name, prompt="unused", active_version_id=f"{name}-1")
+        for name in ("subject", "first", "second")
+    }
+    versions = {
+        f"{name}-{index}": version(f"{name}-{index}", name)
+        for name in sources
+        for index in (1, 2)
+    }
+    edges = (
+        SubjectEdge("s", "subject", "target", VersionPin("subject-1")),
+        ConnectEdge("a", "first", "target", ActivePin(), 0),
+        ConnectEdge("b", "second", "target", ActivePin(), 1),
+    )
+
+    def freeze(node=target, wires=edges, nodes=sources, seed=1):
+        return freeze_run_request(
+            target=node,
+            inbound_edges=wires,
+            nodes=nodes,
+            versions=versions,
+            random_seed=fixed_seed(seed),
+        )
+
+    original = freeze()
+    assert len(original.run_signature) == 64
+    assert freeze(seed=999).run_signature == original.run_signature
+    assert (
+        freeze(node=replace(target, prompt=f" {target.prompt} ")).run_signature
+        == original.run_signature
+    )
+    variants = [
+        freeze(node=replace(target, prompt="Different instructions")),
+        freeze(node=replace(target, seed=7)),
+        freeze(
+            node=replace(
+                target, settings=replace(target.settings, white_background=False)
+            )
+        ),
+        freeze(node=replace(target, settings=replace(target.settings, width=512))),
+        freeze(wires=(replace(edges[0], pin=VersionPin("subject-2")), *edges[1:])),
+        freeze(
+            wires=(edges[0], replace(edges[1], order=1), replace(edges[2], order=0))
+        ),
+        freeze(
+            nodes={
+                **sources,
+                "first": replace(sources["first"], active_version_id="first-2"),
+            }
+        ),
+        freeze(node=replace(target, mask=MaskSnapshot("1 5", 16, 16, "subject-1"))),
+        freeze(node=replace(target, mask=MaskSnapshot("1 6", 16, 16, "subject-1"))),
+    ]
+    assert (
+        len({original.run_signature, *(item.run_signature for item in variants)})
+        == len(variants) + 1
+    )
+    # A full-image selection resolves to no effective mask, as in submission.
+    assert (
+        freeze(
+            node=replace(target, mask=MaskSnapshot("1 256", 16, 16, "subject-1"))
+        ).run_signature
+        == original.run_signature
+    )
+    # A subject is pinned, so its source's active selection is irrelevant.
+    assert (
+        freeze(
+            nodes={
+                **sources,
+                "subject": replace(sources["subject"], active_version_id="subject-2"),
+            }
+        ).run_signature
+        == original.run_signature
+    )
+
+
+def test_run_signature_excludes_random_seed_and_survives_queue_codec() -> None:
+    target = NodeSnapshot(id="origin", prompt="A lamp")
+    first, second = [
+        freeze_run_request(
+            target=target,
+            inbound_edges=(),
+            nodes={},
+            versions={},
+            random_seed=fixed_seed(seed),
+        )
+        for seed in (12, 34)
+    ]
+    assert first.seed != second.seed
+    assert first.run_signature == second.run_signature
+    encoded = encode_frozen_request(first)
+    assert decode_frozen_request(encoded) == first
+    encoded.pop("run_signature")
+    assert decode_frozen_request(encoded) == replace(first, run_signature=None)
 
 
 def test_auto_title_uses_chip_source_title_instead_of_runtime_image_number() -> None:

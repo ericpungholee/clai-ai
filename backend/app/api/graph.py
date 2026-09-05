@@ -229,9 +229,8 @@ def get_run_preview(
 ) -> RunPreviewData:
     get_project_or_404(project_id, db)
     try:
-        return RunPreviewData(
-            op=preview_run(project_id=project_id, node_id=node_id, db=db)
-        )
+        preview = preview_run(project_id=project_id, node_id=node_id, db=db)
+        return RunPreviewData(op=preview.op, run_signature=preview.run_signature)
     except (RunSubmissionError, ValueError) as error:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -255,6 +254,7 @@ def post_run(
             project_id=project_id,
             node_id=node_id,
             idempotency_key=data.idempotency_key,
+            reroll=data.reroll,
             db=db,
         )
         job_id = job.id

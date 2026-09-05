@@ -32,6 +32,9 @@ import {
   duplicateDesignNode,
   getGraph,
   getRun,
+  getRunPreview,
+  runInputKey,
+  settledRunReason,
   patchDesignNode,
   replaceSubjectEdge,
   submitRun,
@@ -146,6 +149,8 @@ export function GraphWorkspace({
   const saves = useRef(new Map<string, Promise<void>>());
   const refreshSequence = useRef(0);
   const deletingNodes = useRef(new Set<string>());
+  const previewRequests = useRef(new Map<string, string>());
+  const submittingNodes = useRef(new Set<string>());
   const allVersions = useRef(
     new Map(
       initialGraph.nodes
@@ -223,6 +228,7 @@ export function GraphWorkspace({
             ...(disconnectingSubjects.current.has(node.id)
               ? { subject: null, mask: null }
               : {}),
+            runPreview: current.data.runPreview,
             meshPreview: current.data.meshPreview,
             previewMode: current.data.previewMode,
             draftError: current.data.draftError,
@@ -437,16 +443,93 @@ export function GraphWorkspace({
 
   const updateNodeData = useCallback(
     (nodeId: string, patch: Partial<WorkspaceNode["data"]>) => {
-      const next = nodesRef.current.map((node) =>
-        node.id === nodeId
-          ? { ...node, data: { ...node.data, ...patch } }
-          : node,
-      );
+      const next = nodesRef.current.map((node) => {
+        if (node.id === nodeId)
+          return { ...node, data: { ...node.data, ...patch } };
+        if ("activeVersionId" in patch)
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              connects: node.data.connects.map((ref) =>
+                ref.nodeId === nodeId
+                  ? {
+                      ...ref,
+                      versionId: patch.activeVersionId ?? null,
+                      state: patch.activeVersionId
+                        ? ("ready" as const)
+                        : ("empty" as const),
+                    }
+                  : ref,
+              ),
+            },
+          };
+        return node;
+      });
       nodesRef.current = next;
       setNodes(next);
     },
     [],
   );
+
+  useEffect(() => {
+    for (const node of nodes) {
+      const active = node.data.versions.find(
+        (version) => version.id === node.data.activeVersionId,
+      );
+      if (
+        !node.measured?.width ||
+        !node.measured?.height ||
+        !active?.run_signature ||
+        runBlockingReason(node.data) ||
+        node.data.draftError ||
+        pendingDocuments.current.has(node.id) ||
+        pendingPatches.current.has(node.id) ||
+        node.data.connects.some(
+          (ref) =>
+            pendingPatches.current.get(ref.nodeId)?.active_version_id !==
+            undefined,
+        ) ||
+        disconnectingSubjects.current.has(node.id)
+      )
+        continue;
+      const key = runInputKey(node.data);
+      if (
+        node.data.runPreview?.key === key ||
+        previewRequests.current.get(node.id) === key
+      )
+        continue;
+      previewRequests.current.set(node.id, key);
+      void getRunPreview(projectId, node.id)
+        .then((preview) => {
+          const current = nodesRef.current.find(
+            (candidate) => candidate.id === node.id,
+          );
+          if (
+            mountedRef.current &&
+            current &&
+            runInputKey(current.data) === key &&
+            !pendingDocuments.current.has(node.id) &&
+            !pendingPatches.current.has(node.id) &&
+            !current.data.connects.some(
+              (ref) =>
+                pendingPatches.current.get(ref.nodeId)?.active_version_id !==
+                undefined,
+            )
+          )
+            updateNodeData(node.id, {
+              runPreview: { key, signature: preview.run_signature },
+            });
+        })
+        .catch(() => {
+          /* The next graph refresh retries a failed preview. */
+        })
+        .finally(() => {
+          if (previewRequests.current.get(node.id) === key)
+            previewRequests.current.delete(node.id);
+        });
+    }
+  }, [nodes, projectId, updateNodeData]);
 
   const focusNode = useCallback((id: string) => {
     const node = nodesRef.current.find((node) => node.id === id);
@@ -544,6 +627,7 @@ export function GraphWorkspace({
         );
         return [
           {
+            versionId: source?.data.activeVersionId ?? null,
             edgeId: part.edge_id,
             nodeId: part.source_node_id,
             title:
@@ -870,26 +954,69 @@ export function GraphWorkspace({
   );
 
   const runNode = useCallback(
-    async (nodeId: string) => {
+    async (nodeId: string, reroll = false) => {
       const node = nodesRef.current.find(
         (candidate) => candidate.id === nodeId,
       );
-      if (!node || runBlockingReason(node.data)) return;
+      if (
+        !node ||
+        runBlockingReason(node.data) ||
+        submittingNodes.current.has(nodeId) ||
+        (!reroll && settledRunReason(node.data))
+      )
+        return;
+      submittingNodes.current.add(nodeId);
       const timer = patchTimersRef.current.get(nodeId);
       if (timer !== undefined) {
         window.clearTimeout(timer);
         patchTimersRef.current.delete(nodeId);
       }
-      updateNodeData(nodeId, {
-        run: {
-          status: "running",
-          job: null,
-          startedAt: new Date().toISOString(),
-        },
-      });
       try {
         await persistNodePatch(nodeId, {});
-        let job = await submitRun(projectId, nodeId, crypto.randomUUID());
+        const current = nodesRef.current.find(
+          (candidate) => candidate.id === nodeId,
+        );
+        if (!current) return;
+        // A locally selected reference image must reach the server before it
+        // resolves this node's preview and freezes the run inputs.
+        await Promise.all(
+          current.data.connects
+            .filter(
+              (ref) =>
+                pendingPatches.current.get(ref.nodeId)?.active_version_id !==
+                undefined,
+            )
+            .map((ref) => saves.current.get(ref.nodeId)),
+        );
+        const key = runInputKey(current.data);
+        const preview = await getRunPreview(projectId, nodeId);
+        if (!nodesRef.current.some((candidate) => candidate.id === nodeId))
+          return;
+        updateNodeData(nodeId, {
+          runPreview: { key, signature: preview.run_signature },
+        });
+        const active = current.data.versions.find(
+          (version) => version.id === current.data.activeVersionId,
+        );
+        if (
+          !reroll &&
+          active?.run_signature &&
+          active.run_signature === preview.run_signature
+        )
+          return;
+        updateNodeData(nodeId, {
+          run: {
+            status: "running",
+            job: null,
+            startedAt: new Date().toISOString(),
+          },
+        });
+        let job = await submitRun(
+          projectId,
+          nodeId,
+          crypto.randomUUID(),
+          reroll,
+        );
         updateNodeData(nodeId, { run: runDisplay(job) });
         while (
           mountedRef.current &&
@@ -919,9 +1046,33 @@ export function GraphWorkspace({
         if (mountedRef.current) {
           updateNodeData(nodeId, { run: { status: "failed", message } });
         }
+      } finally {
+        submittingNodes.current.delete(nodeId);
       }
     },
     [projectId, refreshWorkspace, updateNodeData, persistNodePatch],
+  );
+
+  const runAgain = useCallback(
+    async (nodeId: string) => {
+      const node = nodesRef.current.find(
+        (candidate) => candidate.id === nodeId,
+      );
+      if (!node || runBlockingReason(node.data)) return;
+      const dependents = nodesRef.current.filter((target) =>
+        target.data.connects.some((ref) => ref.nodeId === nodeId),
+      ).length;
+      if (
+        dependents &&
+        !(await confirm(
+          `Run again? "${node.data.title}" feeds ${dependents} ${dependents === 1 ? "node" : "nodes"}, and they will follow the new image.`,
+          "Run again",
+        ))
+      )
+        return;
+      await runNode(nodeId, true);
+    },
+    [confirm, runNode],
   );
 
   const actions = useMemo(
@@ -931,6 +1082,7 @@ export function GraphWorkspace({
       selectVersion,
       branchVersion,
       runNode,
+      runAgain,
       editMask: setMaskNodeId,
       disconnectSubject,
       deleteWire: (id: string) => {
@@ -982,6 +1134,7 @@ export function GraphWorkspace({
     [
       branchVersion,
       disconnectSubject,
+      runAgain,
       runNode,
       selectVersion,
       updateTitle,
@@ -1056,16 +1209,14 @@ export function GraphWorkspace({
   const highlighted = displayEdges.find((edge) => edge.id === activeWire);
   const displayNodes = nodes.map((node) => ({
     ...node,
-    style: {
-      ...node.style,
-      outline:
-        highlighted &&
-        (node.id === highlighted.source || node.id === highlighted.target)
-          ? "2px solid var(--wire-subject)"
-          : undefined,
-      borderRadius: "6px",
+    style: { ...node.style, borderRadius: "6px" },
+    data: {
+      ...node.data,
+      highlightedWireId: activeWire,
+      wireHighlighted:
+        !!highlighted &&
+        (node.id === highlighted.source || node.id === highlighted.target),
     },
-    data: { ...node.data, highlightedWireId: activeWire },
   }));
 
   return (
