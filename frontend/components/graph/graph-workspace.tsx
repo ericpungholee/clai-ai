@@ -41,6 +41,7 @@ import { AddNodeControl } from "./add-node-control";
 import { DesignNode } from "./design-node";
 import { MaskEditor } from "./mask-editor";
 import { ImageViewer } from "./image-viewer";
+import { MeshViewer } from "./mesh-viewer";
 import { CollapseDialog } from "./collapse-dialog";
 import { DesignNodeActionsContext } from "./design-node-actions";
 import { SaveStatus, type SaveState } from "./save-status";
@@ -104,6 +105,7 @@ export function GraphWorkspace({
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [maskNodeId, setMaskNodeId] = useState<string | null>(null);
   const [viewedVersions, setViewedVersions] = useState<Version[]>([]);
+  const [meshVersion, setMeshVersion] = useState<Version | null>(null);
   const [collapseVersionId, setCollapseVersionId] = useState<string | null>(
     null,
   );
@@ -151,6 +153,7 @@ export function GraphWorkspace({
             ? { settings: current.data.settings }
             : {}),
           runState: current.data.runState,
+          meshPreview: current.data.meshPreview,
           runError: current.data.runError,
         },
       };
@@ -579,6 +582,14 @@ export function GraphWorkspace({
       runNode,
       editMask: setMaskNodeId,
       collapseVersion: setCollapseVersionId,
+      viewMesh: (id: string) =>
+        setMeshVersion(
+          nodesRef.current
+            .flatMap((node) => node.data.versions)
+            .find((version) => version.id === id) ?? null,
+        ),
+      viewImage: (nodeId: string) =>
+        updateNodeData(nodeId, { meshPreview: null }),
       viewVersions: (ids: string[]) =>
         setViewedVersions(
           ids.flatMap((id) => {
@@ -628,12 +639,28 @@ export function GraphWorkspace({
       updateDocument,
       projectId,
       refreshWorkspace,
+      updateNodeData,
     ],
   );
 
   return (
     <DesignNodeActionsContext.Provider value={actions}>
       <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-white">
+        {meshVersion ? (
+          <MeshViewer
+            key={meshVersion.id}
+            projectId={projectId}
+            version={meshVersion}
+            onClose={() => setMeshVersion(null)}
+            onPreview={(versionId, url) => {
+              const node = nodesRef.current.find((node) =>
+                node.data.versions.some((version) => version.id === versionId),
+              );
+              if (node)
+                updateNodeData(node.id, { meshPreview: { versionId, url } });
+            }}
+          />
+        ) : null}
         {viewedVersions.length > 0 ? (
           <ImageViewer
             versions={viewedVersions}

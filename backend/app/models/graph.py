@@ -274,6 +274,20 @@ class VersionVisibility(Base):
 
 class VersionMesh(Base):
     __tablename__ = "version_meshes"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'dispatching', 'provider_pending', "
+            "'ingesting', 'complete', 'failed')",
+            name="ck_version_meshes_status",
+        ),
+        CheckConstraint(
+            "texture IN ('no', 'standard')", name="ck_version_meshes_texture"
+        ),
+        CheckConstraint(
+            "status <> 'complete' OR artifact_url IS NOT NULL",
+            name="ck_version_meshes_complete_artifact",
+        ),
+    )
 
     version_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -282,8 +296,26 @@ class VersionMesh(Base):
     )
     provider: Mapped[str] = mapped_column(String(64))
     model: Mapped[str] = mapped_column(String(160))
-    artifact_url: Mapped[str] = mapped_column(String(2048))
-    provider_response_metadata: Mapped[dict[str, object]] = mapped_column(json_type)
+    artifact_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    preview_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32), default="queued", server_default="complete"
+    )
+    texture: Mapped[str] = mapped_column(String(16), default="no", server_default="no")
+    attempt_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), default=uuid.uuid4
+    )
+    source_artifact_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    request_payload: Mapped[dict[str, object]] = mapped_column(json_type, default=dict)
+    provider_request_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    elapsed_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    provider_response_metadata: Mapped[dict[str, object]] = mapped_column(
+        json_type, default=dict
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

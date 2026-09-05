@@ -110,6 +110,7 @@ export type DesignNodeData = {
   resolvedOp: Op;
   runState: "idle" | "running" | "failed";
   runError: string | null;
+  meshPreview: { versionId: string; url: string } | null;
 } & Record<string, unknown>;
 
 export type WorkspaceEdgeData = (
@@ -390,6 +391,7 @@ export function toWorkspaceGraph(graph: GraphDocument): {
             seed: node.seed,
             activeVersionId: node.active_version_id,
             versions: node.versions,
+            meshPreview: null,
             subject,
             mask: node.mask,
             document: node.document,
