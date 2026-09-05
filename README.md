@@ -53,6 +53,8 @@ cp .env.example .env
 
 Set `FAL_KEY` to enable generation, SAM selection and 3D. Artifacts default to a shared local volume; both the API and worker must use the same storage. Provider outputs are copied there before committing a version or mesh cache.
 
+The frontend installs locked dependencies into its Docker volume before starting Next.js, so rebuilding with a new dependency cannot leave that volume stale.
+
 ```bash
 make dev
 make migrate

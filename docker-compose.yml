@@ -121,7 +121,11 @@ services:
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
-    command: npm run dev -- --hostname 0.0.0.0 --port 3000
+      # Both decoders must stay pinned to the same real SAM response.
+      - ./backend/tests/fixtures/sam-3-image-rle.json:/backend/tests/fixtures/sam-3-image-rle.json:ro
+    # The persistent dependency volume can outlive the image that populated it.
+    command: >
+      sh -c "npm ci --no-audit --no-fund && exec npm run dev -- --hostname 0.0.0.0 --port 3000"
     depends_on:
       backend:
         condition: service_healthy
