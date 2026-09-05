@@ -1,8 +1,8 @@
 # Clai
 
-Clai is a node-based canvas for concepting physical products with AI. Wiring an immutable image version into another node as its subject changes the next run from generation to an identity-preserving edit.
+Clai is a node-based canvas for concepting physical products with AI. Wiring an immutable image version into another node as its subject changes the next run from generation to a subject-based edit.
 
-## P0 functionality
+## Functionality
 
 - Unified design nodes with prompts, active artifacts, subject thumbnails, and version strips.
 - Subject wires pin a specific immutable version. A second subject wire replaces the first atomically.
@@ -13,6 +13,12 @@ Clai is a node-based canvas for concepting physical products with AI. Wiring an 
 - Insert-only versions with provenance and internal per-operation DINOv2 change telemetry.
 - Subject-version-bound masks with brush, lasso, rectangle and SAM click/text selection.
 - FLUX Fill inpainting followed by a deterministic 3px composite seam; pixels outside that band are preserved from the original. Full-image selections become ordinary edits, and stale masks block runs.
+- Atomic connect chips/wires, following active source images in sentence order, with a two-connect cap and broken-source blocking.
+- Full-size image inspection, original download, side-by-side comparison, retained hidden versions, branch navigation and explicit editable chain collapse.
+- Version-specific Tripo 3D form view, default grey geometry ($0.20), optional standard textures ($0.30), first-party GLB/preview storage, and explicit occlusion warnings.
+- Durable run progress across reloads, draft conflict handling across tabs, node duplication, canvas shortcuts and project rename/delete with retained history.
+
+Live acceptance gates remain: the tested preamble candidate is held after background/framing drift, masked runs with connect images block pending the provider-routing decision, and the first Tripo contract attempt returned 422. No successful 3D generation latency is claimed. See `.progress/current.md`; phase PRs remain drafts. Auth and deployment are out of scope.
 
 ## Stack
 

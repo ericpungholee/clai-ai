@@ -16,6 +16,7 @@ from app.schemas.graph import (
     GraphEdgeData,
     GraphNodeData,
     NodeCreate,
+    NodeSettingsData,
     NodeUpdate,
     PromptUpdate,
     RunJobData,
@@ -45,7 +46,7 @@ def get_project_or_404(project_id: uuid.UUID, db: Session) -> Project:
     project = db.scalar(
         select(Project).where(Project.id == project_id).with_for_update()
     )
-    if project is None:
+    if project is None or project.deleted_at is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
         )
@@ -87,7 +88,7 @@ def patch_node(
     data: NodeUpdate,
     db: Session = Depends(get_db),
 ) -> GraphNodeData:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
     node = db.scalar(
         select(GraphNode)
         .where(
@@ -101,6 +102,7 @@ def patch_node(
         raise HTTPException(status_code=404, detail="Node not found")
     try:
         update_node(node, data, db)
+        project.updated_at = datetime.now(UTC)
         versions = list(
             db.scalars(
                 select(Version)
@@ -173,9 +175,10 @@ def put_prompt(
     data: PromptUpdate,
     db: Session = Depends(get_db),
 ) -> GraphDocument:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
     try:
         update_prompt(project_id, node_id, data, db)
+        project.updated_at = datetime.now(UTC)
         db.commit()
         return read_graph_document(project_id, db)
     except GraphConflictError as error:
@@ -346,3 +349,74 @@ def delete_node(
         db.rollback()
         raise HTTPException(status_code=409, detail="Node cannot be deleted") from error
     return Response(status_code=204)
+
+
+@router.post(
+    "/{project_id}/nodes/{node_id}/duplicate",
+    response_model=GraphNodeData,
+    status_code=201,
+)
+def duplicate_node(
+    project_id: uuid.UUID,
+    node_id: uuid.UUID,
+    data: NodeCreate,
+    db: Session = Depends(get_db),
+) -> GraphNodeData:
+    project = get_project_or_404(project_id, db)
+    source = db.scalar(
+        select(GraphNode).where(
+            GraphNode.id == node_id,
+            GraphNode.project_id == project_id,
+            GraphNode.deleted_at.is_(None),
+        )
+    )
+    if source is None:
+        raise HTTPException(404, "Node not found")
+    data.title = f"{source.title[:113]} · copy"
+    data.settings = NodeSettingsData.model_validate(
+        {
+            **source.settings,
+            "whiteBackground": source.settings.get("whiteBackground", False),
+        }
+    )
+    data.seed = source.seed
+    node = create_node(project_id, data, db)
+    # Copy the draft and wiring, not historical versions or the source's active pointer.
+    node.prompt = [
+        {**part, "edge_id": str(uuid.uuid4())}
+        if part["type"] == "connect"
+        else dict(part)
+        for part in source.prompt
+    ]
+    source_edges = list(
+        db.scalars(select(GraphEdge).where(GraphEdge.target_node_id == source.id))
+    )
+    chip_ids = {
+        part["source_node_id"]: uuid.UUID(part["edge_id"])
+        for part in node.prompt
+        if part["type"] == "connect"
+    }
+    for edge in source_edges:
+        db.add(
+            GraphEdge(
+                id=chip_ids[str(edge.source_node_id)]
+                if edge.role == "connect"
+                else uuid.uuid4(),
+                project_id=project_id,
+                source_node_id=edge.source_node_id,
+                target_node_id=node.id,
+                role=edge.role,
+                pin_mode=edge.pin_mode,
+                pinned_version_id=edge.pinned_version_id,
+                connect_order=edge.connect_order,
+            )
+        )
+    node.mask_rle, node.mask_width, node.mask_height, node.mask_subject_version_id = (
+        source.mask_rle,
+        source.mask_width,
+        source.mask_height,
+        source.mask_subject_version_id,
+    )
+    project.updated_at = datetime.now(UTC)
+    db.commit()
+    return serialize_node(node, [])

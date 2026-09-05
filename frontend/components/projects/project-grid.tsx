@@ -11,9 +11,12 @@ export function ProjectGrid({ projects }: ProjectGridProps) {
   if (projects.length === 0) {
     return (
       <div className="py-20">
-        <h2 className="text-base font-medium text-foreground">No projects yet</h2>
+        <h2 className="text-base font-medium text-foreground">
+          No projects yet
+        </h2>
         <p className="mt-1.5 mb-5 text-sm text-muted">
-          Create your first project to start exploring ideas.
+          Create a project, describe one product, then branch from an image to
+          explore changes without losing the original.
         </p>
         <NewProjectButton />
       </div>

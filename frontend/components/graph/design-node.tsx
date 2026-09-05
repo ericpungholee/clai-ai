@@ -7,6 +7,7 @@ import { useDesignNodeActions } from "./design-node-actions";
 import { NodeFrame } from "./node-frame";
 import { PromptEditor } from "./prompt-editor";
 import { VersionStrip } from "./version-strip";
+import { RunProgress } from "./run-progress";
 
 export const DesignNode = memo(function DesignNode({
   id,
@@ -29,10 +30,11 @@ export const DesignNode = memo(function DesignNode({
   const unsupportedMask =
     data.mask !== null && !fullMask && data.connects.length > 0;
   const canRun =
+    !data.remoteDeleted &&
     !brokenConnect &&
     !unsupportedMask &&
     data.prompt.trim().length > 0 &&
-    data.runState !== "running" &&
+    data.run.status !== "running" &&
     !staleMask;
 
   return (
@@ -148,7 +150,18 @@ export const DesignNode = memo(function DesignNode({
             <p className="truncate text-xs text-neutral-700">
               {data.subject.nodeTitle}
             </p>
+            {data.subject.deleted ? (
+              <p className="text-[10px] text-sky-700">
+                Source deleted · pinned image retained
+              </p>
+            ) : null}
           </div>
+          <button
+            className="nodrag ml-auto text-[10px] text-sky-700"
+            onClick={() => actions.viewVersions([data.subject!.versionId])}
+          >
+            Inspect
+          </button>
         </div>
       ) : null}
 
@@ -224,12 +237,53 @@ export const DesignNode = memo(function DesignNode({
           onClick={() => actions.runNode(id)}
           type="button"
         >
-          {data.runState === "running" ? "Running…" : "Run"}
+          {data.run.status === "running"
+            ? "Running…"
+            : data.run.status === "failed"
+              ? "Retry run"
+              : "Run"}
         </button>
       </div>
-      {data.runError ? (
-        <p className="mt-2 text-xs text-red-600">{data.runError}</p>
+      {data.run.status === "running" ? <RunProgress run={data.run} /> : null}
+      {data.run.status === "failed" ? (
+        <div role="alert" className="mt-2 text-xs text-red-700">
+          The run did not finish. Your prompt and earlier images are safe.
+          <details className="nodrag mt-1 break-words">
+            <summary>Details</summary>
+            {data.run.message}
+          </details>
+        </div>
       ) : null}
+      {data.draftError ? (
+        <div
+          role="alert"
+          className="mt-2 rounded bg-amber-50 p-2 text-xs text-amber-900"
+        >
+          <p className="break-words">{data.draftError}</p>
+          {!data.remoteDeleted ? (
+            <div className="nodrag mt-2 flex gap-2">
+              <button
+                className="underline"
+                onClick={() => actions.resolveDraft(id, true)}
+              >
+                Keep my draft
+              </button>
+              <button
+                className="underline"
+                onClick={() => actions.resolveDraft(id, false)}
+              >
+                Use saved draft
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="nodrag mt-3 flex gap-3 border-t pt-2 text-[10px] text-neutral-400">
+        <button onClick={() => actions.duplicateNode(id)}>
+          Duplicate draft
+        </button>
+        <button onClick={() => actions.deleteNode(id)}>Delete node</button>
+      </div>
     </NodeFrame>
   );
 });

@@ -4,7 +4,6 @@ import { createContext, useContext } from "react";
 import type { PromptPart } from "@/lib/graph";
 
 type DesignNodeActions = {
-  updatePrompt: (nodeId: string, prompt: string) => void;
   updateTitle: (nodeId: string, title: string) => void;
   updateWhiteBackground: (nodeId: string, enabled: boolean) => void;
   selectVersion: (nodeId: string, versionId: string) => void;
@@ -14,6 +13,9 @@ type DesignNodeActions = {
   viewVersions: (versionIds: string[]) => void;
   viewMesh: (versionId: string) => void;
   viewImage: (nodeId: string) => void;
+  duplicateNode: (nodeId: string) => void;
+  deleteNode: (nodeId: string) => void;
+  resolveDraft: (nodeId: string, keepMine: boolean) => void;
   runNode: (nodeId: string) => void;
   editMask: (nodeId: string) => void;
   updateDocument: (nodeId: string, document: PromptPart[]) => void;

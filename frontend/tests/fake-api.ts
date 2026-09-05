@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import type { GraphDocument } from "../lib/graph.ts";
+import type { GraphDocument, RunJob } from "../lib/graph.ts";
 import type { MeshData } from "../lib/meshes.ts";
 
 const project = {
@@ -45,6 +45,7 @@ function fixture(): GraphDocument {
         document: [{ type: "text", text: "A lamp" }],
         revision: 0,
         deleted: false,
+        run: null,
         title: "Desk lamp",
         prompt: "A lamp",
         settings,
@@ -59,6 +60,7 @@ function fixture(): GraphDocument {
         document: [{ type: "text", text: "Make the shade orange" }],
         revision: 0,
         deleted: false,
+        run: null,
         title: "Change the shade",
         prompt: "Make the shade orange",
         settings,
@@ -83,6 +85,8 @@ function fixture(): GraphDocument {
 }
 let graph = fixture();
 const meshes = new Map<string, MeshData>();
+const runs = new Map<string, { job: RunJob; prompt: string }>();
+let projectDeleted = false;
 
 function meshFixture(): Buffer {
   const binary = Buffer.alloc(36);
@@ -144,7 +148,112 @@ createServer(async (request, response) => {
   if (path === "/reset") {
     graph = fixture();
     meshes.clear();
+    runs.clear();
+    projectDeleted = false;
+    project.name = "Mask test";
     response.end("{}");
+    return;
+  }
+  if (path === "/empty-projects") {
+    projectDeleted = true;
+    response.end("{}");
+    return;
+  }
+  if (path === "/finish-run" || path === "/fail-run") {
+    const entry = [...runs.values()].at(-1)!;
+    const node = graph.nodes.find((node) => node.id === entry.job.node_id)!;
+    if (path === "/fail-run") {
+      entry.job.status = "failed";
+      entry.job.error = "Fixture provider could not finish";
+    } else {
+      const version = {
+        ...fixture().nodes[0].versions[0],
+        id: `result-${entry.job.id}`,
+        node_id: node.id,
+        prompt_at_runtime: entry.prompt,
+        created_at: new Date().toISOString(),
+        branch_node_ids: [],
+      };
+      node.versions.push(version);
+      node.active_version_id = version.id;
+      entry.job.status = "complete";
+      entry.job.version_id = version.id;
+    }
+    entry.job.completed_at = new Date().toISOString();
+    node.run = entry.job;
+    response.end("{}");
+    return;
+  }
+  if (path.endsWith("/runs") && request.method === "POST") {
+    const node = graph.nodes.find((node) =>
+      path.includes(`/nodes/${node.id}/`),
+    )!;
+    const job: RunJob = {
+      id: crypto.randomUUID(),
+      node_id: node.id,
+      status: "queued",
+      op: "edit_instruct",
+      attempts: 0,
+      error: null,
+      version_id: null,
+      created_at: new Date().toISOString(),
+      completed_at: null,
+    };
+    node.run = job;
+    runs.set(job.id, { job, prompt: node.prompt });
+    response.writeHead(202).end(JSON.stringify(job));
+    return;
+  }
+  if (path.includes("/runs/")) {
+    const entry = runs.get(path.split("/runs/")[1])!;
+    response.end(JSON.stringify(entry.job));
+    return;
+  }
+  if (path.endsWith("/nodes") && request.method === "POST") {
+    const node = {
+      ...fixture().nodes[1],
+      id: body.id,
+      title: "Untitled concept",
+      prompt: "",
+      document: [],
+      position: body.position,
+    };
+    graph.nodes.push(node);
+    response.writeHead(201).end(JSON.stringify(node));
+    return;
+  }
+  if (path.endsWith("/duplicate")) {
+    const source = graph.nodes.find((node) =>
+      path.includes(`/nodes/${node.id}/`),
+    )!;
+    const node = {
+      ...structuredClone(source),
+      id: body.id,
+      title: `${source.title} · copy`,
+      position: body.position,
+      versions: [],
+      active_version_id: null,
+      revision: 0,
+      run: null,
+    };
+    graph.nodes.push(node);
+    response.writeHead(201).end(JSON.stringify(node));
+    return;
+  }
+  if (request.method === "DELETE" && /\/nodes\/[^/]+$/.test(path)) {
+    const node = graph.nodes.find((node) =>
+      path.endsWith(`/nodes/${node.id}`),
+    )!;
+    node.deleted = true;
+    response.writeHead(204).end();
+    return;
+  }
+  if (request.method === "DELETE" && path.endsWith("/subject")) {
+    const id = path.split("/nodes/")[1].split("/")[0];
+    graph.edges = graph.edges.filter(
+      (edge) => edge.target_node_id !== id || edge.role !== "subject",
+    );
+    response.writeHead(204).end();
     return;
   }
   if (path === "/artifacts/mesh.glb") {
@@ -185,6 +294,27 @@ createServer(async (request, response) => {
       id: index === 0 ? first.id : `version-${index + 1}`,
     }));
     source.active_version_id = "version-15";
+    response.end("{}");
+    return;
+  }
+  if (path === "/large-canvas") {
+    const source = fixture().nodes[0];
+    graph.nodes = Array.from({ length: 50 }, (_, index) => ({
+      ...structuredClone(source),
+      id: `concept-${index}`,
+      title: `Concept ${index + 1}`,
+      active_version_id: `version-${index}`,
+      position: { x: (index % 10) * 380, y: Math.floor(index / 10) * 850 },
+      versions: [
+        {
+          ...source.versions[0],
+          id: `version-${index}`,
+          node_id: `concept-${index}`,
+          branch_node_ids: [],
+        },
+      ],
+    }));
+    graph.edges = [];
     response.end("{}");
     return;
   }
@@ -267,10 +397,23 @@ createServer(async (request, response) => {
     return;
   }
   if (path === "/api/projects") {
-    response.end(JSON.stringify([project]));
+    if (request.method === "POST") {
+      projectDeleted = false;
+      project.name = body.name;
+      graph = { nodes: [], edges: [] };
+      response.writeHead(201).end(JSON.stringify(project));
+      return;
+    }
+    response.end(JSON.stringify(projectDeleted ? [] : [project]));
     return;
   }
   if (path === "/api/projects/fixture-project") {
+    if (request.method === "DELETE") {
+      projectDeleted = true;
+      response.writeHead(204).end();
+      return;
+    }
+    if (request.method === "PATCH") project.name = body.name;
     response.end(JSON.stringify(project));
     return;
   }

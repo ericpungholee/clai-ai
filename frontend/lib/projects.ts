@@ -36,3 +36,23 @@ export async function getProject(id: string): Promise<Project | null> {
 
   return response.json();
 }
+
+export async function changeProject(id: string, name?: string): Promise<void> {
+  const origin = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const response = await fetch(
+    `${origin}/api/projects/${id}`,
+    name === undefined
+      ? { method: "DELETE" }
+      : {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        },
+  );
+  if (!response.ok)
+    throw new Error(
+      name === undefined
+        ? "Could not delete project"
+        : "Could not rename project",
+    );
+}

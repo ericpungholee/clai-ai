@@ -1,13 +1,14 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.domain.prompts import document_text, text_document
 from app.models.graph import (
     GraphEdge,
     GraphNode,
+    RunJob,
     Version,
     VersionMetric,
     VersionVisibility,
@@ -27,6 +28,7 @@ from app.schemas.graph import (
     NodeUpdate,
     PromptConnectData,
     PromptUpdate,
+    RunJobData,
     SubjectEdgeData,
     SubjectEdgeReplace,
     VersionData,
@@ -112,6 +114,40 @@ def read_graph_document(project_id: uuid.UUID, db: Session) -> GraphDocument:
             version.branch_node_ids = branches.get(version.id, [])
             if version.op in {"edit_inpaint", "edit_composite"}:
                 version.masked_outside_change = masked_metrics.get(version.id)
+    ranked = (
+        select(
+            RunJob.id,
+            func.row_number()
+            .over(
+                partition_by=RunJob.node_id,
+                order_by=(RunJob.created_at.desc(), RunJob.id.desc()),
+            )
+            .label("rank"),
+        )
+        .where(RunJob.project_id == project_id)
+        .subquery()
+    )
+    jobs = db.execute(
+        select(
+            RunJob.id,
+            RunJob.node_id,
+            RunJob.status,
+            RunJob.attempts,
+            RunJob.error,
+            RunJob.created_at,
+            RunJob.completed_at,
+            RunJob.frozen_request["op"].as_string().label("op"),
+        )
+        .join(ranked, ranked.c.id == RunJob.id)
+        .where(ranked.c.rank == 1)
+    )
+    versions_by_job = {version.run_job_id: version.id for version in versions}
+    runs = {
+        row.node_id: RunJobData(**row._mapping, version_id=versions_by_job.get(row.id))
+        for row in jobs
+    }
+    for node in document.nodes:
+        node.run = runs.get(node.id)
     return document
 
 

@@ -6,7 +6,9 @@ from pydantic import BaseModel, Field, JsonValue, StringConstraints
 
 from app.domain.runs import Op
 
-Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+Title = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)
+]
 
 
 class GraphPosition(BaseModel):
@@ -81,6 +83,7 @@ class GraphNodeData(BaseModel):
     document: list[PromptPartData]
     revision: int
     deleted: bool = False
+    run: "RunJobData | None" = None
 
 
 class VersionPinData(BaseModel):

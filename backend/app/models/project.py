@@ -26,3 +26,6 @@ class Project(Base):
         onupdate=func.now(),
     )
     thumbnail_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

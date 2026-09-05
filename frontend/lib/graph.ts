@@ -51,6 +51,7 @@ export type PersistedGraphNode = {
   document: PromptPart[];
   revision: number;
   deleted: boolean;
+  run: RunJob | null;
 };
 
 export type PromptPart =
@@ -95,6 +96,11 @@ export type SubjectPreview = {
   artifactUrl: string;
 };
 
+export type NodeRunState =
+  | { status: "idle" }
+  | { status: "running"; job: RunJob | null; startedAt: string }
+  | { status: "failed"; message: string };
+
 export type DesignNodeData = {
   title: string;
   prompt: string;
@@ -107,9 +113,9 @@ export type DesignNodeData = {
   document: PromptPart[];
   revision: number;
   connects: ConnectPreview[];
-  resolvedOp: Op;
-  runState: "idle" | "running" | "failed";
-  runError: string | null;
+  remoteDeleted: boolean;
+  run: NodeRunState;
+  draftError: string | null;
   meshPreview: { versionId: string; url: string } | null;
 } & Record<string, unknown>;
 
@@ -237,6 +243,21 @@ export async function deleteDesignNode(
   await apiRequest(
     `${browserApiUrl}/api/projects/${projectId}/nodes/${nodeId}`,
     { method: "DELETE" },
+  );
+}
+
+export async function duplicateDesignNode(
+  projectId: string,
+  nodeId: string,
+  position: { x: number; y: number },
+): Promise<PersistedGraphNode> {
+  return apiRequest(
+    `${browserApiUrl}/api/projects/${projectId}/nodes/${nodeId}/duplicate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: crypto.randomUUID(), position }),
+    },
   );
 }
 
@@ -413,15 +434,9 @@ export function toWorkspaceGraph(graph: GraphDocument): {
                 },
               ];
             }),
-            resolvedOp: resolveOp({
-              hasSubject: subject !== null,
-              hasMask: subject !== null && node.mask !== null,
-              connectCount: node.document.filter(
-                (part) => part.type === "connect",
-              ).length,
-            }),
-            runState: "idle" as const,
-            runError: null,
+            remoteDeleted: false,
+            run: runDisplay(node.run),
+            draftError: null,
           },
         };
       }),
@@ -433,6 +448,16 @@ export function toWorkspaceGraph(graph: GraphDocument): {
       )
       .map(toWorkspaceEdge),
   };
+}
+
+export function runDisplay(job: RunJob | null): NodeRunState {
+  if (!job || job.status === "complete") return { status: "idle" };
+  if (job.status === "failed")
+    return {
+      status: "failed",
+      message: job.error ?? "The provider could not finish this run.",
+    };
+  return { status: "running", job, startedAt: job.created_at };
 }
 
 export function toWorkspaceEdge(edge: PersistedGraphEdge): WorkspaceEdge {
@@ -453,36 +478,27 @@ export function toWorkspaceEdge(edge: PersistedGraphEdge): WorkspaceEdge {
   };
 }
 
-export function resolveOp(input: {
-  hasSubject: boolean;
-  hasMask: boolean;
-  connectCount: number;
-}): Op {
-  if (input.connectCount < 0 || input.connectCount > 2) {
-    throw new Error("A run accepts between zero and two connects");
-  }
-  if (input.hasMask && !input.hasSubject) {
-    throw new Error("A mask requires a subject");
-  }
-  if (!input.hasSubject && input.connectCount === 0) return "generate";
-  if (!input.hasSubject) return "generate_ref";
-  if (input.hasMask && input.connectCount === 0) return "edit_inpaint";
-  if (input.hasMask) return "edit_composite";
-  if (input.connectCount > 0) return "edit_ref_guided";
-  return "edit_instruct";
-}
-
 async function apiRequest<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
+    const value =
+      body && typeof body === "object" && "detail" in body ? body.detail : null;
     const detail =
-      body &&
-      typeof body === "object" &&
-      "detail" in body &&
-      typeof body.detail === "string"
-        ? body.detail
-        : "Request failed";
+      typeof value === "string"
+        ? value
+        : Array.isArray(value)
+          ? value
+              .map((item: unknown) =>
+                item &&
+                typeof item === "object" &&
+                "msg" in item &&
+                typeof item.msg === "string"
+                  ? item.msg
+                  : "Invalid field",
+              )
+              .join(". ")
+          : "Request failed";
     throw new Error(detail);
   }
   if (response.status === 204) return undefined as T;

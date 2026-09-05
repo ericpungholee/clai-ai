@@ -189,6 +189,7 @@ export function MeshViewer({
 
 function GlbView({ mesh }: { mesh: MeshData & { status: "complete" } }) {
   const host = useRef<HTMLDivElement>(null);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -206,6 +207,9 @@ function GlbView({ mesh }: { mesh: MeshData & { status: "complete" } }) {
         viewer.style.width = "100%";
         viewer.style.height = "100%";
         if (mesh.preview_url) viewer.poster = mesh.preview_url;
+        viewer.addEventListener("load", () => {
+          if (alive) setLoaded(true);
+        });
         viewer.addEventListener("error", () => {
           if (alive)
             setError(
@@ -225,6 +229,14 @@ function GlbView({ mesh }: { mesh: MeshData & { status: "complete" } }) {
   }, [mesh.artifact_url, mesh.preview_url]);
   return (
     <>
+      {!loaded && mesh.preview_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={mesh.preview_url}
+          alt="Stored mesh preview while the viewer loads"
+          className="pointer-events-none absolute h-full w-full object-contain"
+        />
+      ) : null}
       {error ? (
         <p
           role="alert"

@@ -88,8 +88,11 @@ export function VersionStrip({
               </div>
               {version.branch_node_ids.length > 0 ? (
                 <details className="mt-1 text-[10px] text-violet-700">
-                  <summary className="cursor-pointer">
-                    ↗ {version.branch_node_ids.length} branches
+                  <summary
+                    className="cursor-pointer whitespace-nowrap"
+                    aria-label={`${version.branch_node_ids.length} branches from version ${index + 1}`}
+                  >
+                    ↗ {version.branch_node_ids.length}
                   </summary>
                   {version.branch_node_ids.map((id) => (
                     <button
