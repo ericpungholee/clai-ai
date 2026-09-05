@@ -4,13 +4,22 @@ import { useEffect, useRef, useState } from "react";
 import type { Version } from "@/lib/graph";
 
 export function ImageViewer({
-  versions,
+  versions: initialVersions,
+  comparisonVersions = [],
   onClose,
 }: {
   versions: Version[];
+  comparisonVersions?: Version[];
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [comparisonId, setComparisonId] = useState<string | null>(null);
+  const comparison = comparisonVersions.find(
+    (version) => version.id === comparisonId,
+  );
+  const versions = comparison
+    ? [initialVersions[0], comparison]
+    : initialVersions;
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
@@ -25,6 +34,24 @@ export function ImageViewer({
           {versions.length === 2 ? "Compare versions" : "Inspect image"} ·
           Scroll to zoom, drag to pan
         </p>
+        {comparisonVersions.length > 1 ? (
+          <select
+            aria-label="Compare active version to"
+            className="rounded border border-neutral-600 bg-neutral-900 px-2 py-1 text-xs"
+            value={comparisonId ?? initialVersions[1]?.id ?? ""}
+            onChange={(event) => setComparisonId(event.target.value)}
+          >
+            <option value="">Compare</option>
+            {comparisonVersions.map((version, index) =>
+              version.id !== initialVersions[0].id ? (
+                <option key={version.id} value={version.id}>
+                  v{index + 1}
+                  {version.hidden ? " (hidden)" : ""}
+                </option>
+              ) : null,
+            )}
+          </select>
+        ) : null}
         <button
           onClick={onClose}
           className="rounded border border-neutral-600 px-3 py-1 text-sm"

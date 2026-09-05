@@ -9,7 +9,8 @@ test("rectangle, brush, lasso, undo, empty selection and version binding", async
   request,
 }) => {
   await page.goto("/projects/fixture-project");
-  await page.getByRole("button", { name: "Select an area to edit" }).click();
+  await page.locator('[data-id="target"] .image-preview').hover();
+  await page.getByRole("button", { name: "Select area" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Save mask", exact: true }).click();
@@ -47,7 +48,7 @@ test("rectangle, brush, lasso, undo, empty selection and version binding", async
   await page.reload();
   await expect(
     page.locator('[data-id="target"]').getByRole("alert"),
-  ).toContainText("different subject version");
+  ).toContainText("Different subject version");
   await expect(
     page
       .locator('[data-id="target"]')

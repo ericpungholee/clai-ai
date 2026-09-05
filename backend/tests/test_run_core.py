@@ -392,3 +392,35 @@ def test_valid_mask_is_hashed_into_frozen_provenance() -> None:
     assert request.op is Op.EDIT_INPAINT
     assert request.input_snapshot.mask_hash is not None
     assert len(request.input_snapshot.mask_hash) == 64
+
+
+def test_auto_title_uses_chip_source_title_instead_of_runtime_image_number() -> None:
+    from app.services.run_execution import auto_node_title
+
+    assert (
+        auto_node_title(
+            [
+                {"type": "connect", "edge_id": "reference", "source_node_id": "bottle"},
+                {"type": "text", "text": ". the cap should be same size"},
+            ],
+            {"bottle": "Bottle base"},
+        )
+        == "Bottle base. the cap should"
+    )
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        ("image 2. the cap should be same size", "the cap should be same"),
+        ("Image 3: brass cap", "brass cap"),
+        ("image 2", "Untitled concept"),
+        ("image 2 image 3: cap", "Untitled concept"),
+        ("", "Untitled concept"),
+        ("a" * 80, "a" * 60),
+    ],
+)
+def test_auto_title_strips_placeholders_and_limits_length(prompt, expected) -> None:
+    from app.services.run_execution import auto_node_title
+
+    assert auto_node_title([{"type": "text", "text": prompt}], {}) == expected

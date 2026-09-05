@@ -1,7 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import type { ConnectPreview, PromptPart } from "@/lib/graph";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
+import {
+  referenceNumber,
+  type ConnectPreview,
+  type PromptPart,
+} from "@/lib/graph";
 
 type Candidate = { id: string; title: string };
 
@@ -37,11 +47,44 @@ function readDocument(root: HTMLElement): PromptPart[] {
   return parts;
 }
 
+function animateDeparture(chip: HTMLElement) {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const box = chip.getBoundingClientRect();
+  const copy = chip.cloneNode(true) as HTMLElement;
+  copy.removeAttribute("data-edge-id");
+  copy.removeAttribute("tabindex");
+  copy.setAttribute("aria-hidden", "true");
+  Object.assign(copy.style, {
+    position: "fixed",
+    left: `${box.left}px`,
+    top: `${box.top}px`,
+    width: `${box.width}px`,
+    height: `${box.height}px`,
+    pointerEvents: "none",
+    zIndex: "100",
+  });
+  window.document.body.append(copy);
+  const animation = copy.animate(
+    [
+      { opacity: 0.7, transform: "scale(1)" },
+      { opacity: 0, transform: "scale(0.85)" },
+    ],
+    { duration: 150 },
+  );
+  void animation.finished.then(
+    () => copy.remove(),
+    () => copy.remove(),
+  );
+}
+
 export function PromptEditor({
   document,
   connects,
   candidates,
   placeholder,
+  hasSubject,
+  highlightedWireId,
+  footer,
   onChange,
   onHover,
   onJump,
@@ -51,6 +94,9 @@ export function PromptEditor({
   connects: ConnectPreview[];
   candidates: Candidate[];
   placeholder: string;
+  hasSubject: boolean;
+  highlightedWireId: string | null;
+  footer: ReactNode;
   onChange: (document: PromptPart[]) => void;
   onHover: (id: string | null) => void;
   onJump: (id: string) => void;
@@ -65,6 +111,15 @@ export function PromptEditor({
     const root = editor.current!;
     const serialized = JSON.stringify(document);
     if (serialized !== lastDocument.current) {
+      root.querySelectorAll<HTMLElement>("[data-edge-id]").forEach((chip) => {
+        if (
+          !document.some(
+            (part) =>
+              part.type === "connect" && part.edge_id === chip.dataset.edgeId,
+          )
+        )
+          animateDeparture(chip);
+      });
       root.replaceChildren(
         ...document.map((part) => {
           if (part.type === "text")
@@ -82,19 +137,62 @@ export function PromptEditor({
       const ref = connects.find(
         (value) => value.edgeId === chip.dataset.edgeId,
       );
-      chip.textContent = `@${ref?.title ?? "Deleted concept"}`;
-      chip.className = `mx-0.5 inline rounded px-1 py-0.5 text-xs ${ref?.state === "ready" ? "bg-purple-100 text-purple-900" : "bg-red-100 text-red-800"}`;
+      const number = referenceNumber(
+        connects.findIndex((value) => value.edgeId === chip.dataset.edgeId),
+        hasSubject,
+      );
+      const label = ref?.title ?? "Deleted concept";
+      const badge = window.document.createElement("span");
+      badge.className = "wire-number";
+      badge.textContent = String(number);
+      const name = window.document.createElement("span");
+      name.textContent = `@${label.length > 18 ? `${label.slice(0, 18)}…` : label}`;
+      chip.replaceChildren(badge, name);
+      chip.className = `prompt-chip ${ref?.state === "deleted" ? "broken" : ""}`;
+      chip.dataset.highlighted = String(
+        highlightedWireId === chip.dataset.edgeId,
+      );
+      chip.tabIndex = 0;
+      chip.setAttribute("role", "button");
+      chip.setAttribute("aria-label", `Image ${number}: ${label}`);
       chip.title =
         ref?.state === "deleted"
           ? "Source deleted — remove or replace this chip"
           : ref?.state === "empty"
             ? "Run the source node first"
             : "Click to find on canvas";
-      chip.onmouseenter = () => onHover(chip.dataset.sourceId!);
+      chip.onmouseenter = () => onHover(chip.dataset.edgeId!);
+      chip.onfocus = () => onHover(chip.dataset.edgeId!);
+      chip.onblur = () => onHover(null);
       chip.onmouseleave = () => onHover(null);
       chip.onclick = () => onJump(chip.dataset.sourceId!);
+      chip.onkeydown = (event) => {
+        if (event.key === "Enter" && !event.metaKey && !event.ctrlKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          onJump(chip.dataset.sourceId!);
+        }
+        if (event.key === "Backspace" || event.key === "Delete") {
+          event.preventDefault();
+          event.stopPropagation();
+          animateDeparture(chip);
+          chip.remove();
+          editor.current?.focus();
+          const value = readDocument(root);
+          lastDocument.current = JSON.stringify(value);
+          onChange(value);
+        }
+      };
     });
-  }, [document, connects, onHover, onJump]);
+  }, [
+    document,
+    connects,
+    hasSubject,
+    highlightedWireId,
+    onHover,
+    onJump,
+    onChange,
+  ]);
 
   function emit() {
     const value = readDocument(editor.current!);
@@ -163,6 +261,7 @@ export function PromptEditor({
         : anchor.childNodes[backwards ? offset - 1 : offset];
     if (neighbor instanceof HTMLElement && neighbor.dataset.edgeId) {
       event.preventDefault();
+      animateDeparture(neighbor);
       neighbor.remove();
       emit();
     }
@@ -173,7 +272,7 @@ export function PromptEditor({
       candidate.title.toLowerCase().includes(query.toLowerCase()),
   );
   return (
-    <div className="nodrag nowheel relative mt-3">
+    <div className="nodrag nowheel relative rounded-lg border border-neutral-200 bg-white focus-within:border-blue-400">
       <div
         ref={editor}
         role="textbox"
@@ -182,7 +281,7 @@ export function PromptEditor({
         contentEditable
         suppressContentEditableWarning
         data-placeholder={placeholder}
-        className="prompt-editor max-h-52 min-h-20 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-sm leading-6 outline-none focus:border-sky-400"
+        className="prompt-editor max-h-32 min-h-16 overflow-y-auto whitespace-pre-wrap break-words px-2.5 py-2 text-sm leading-6 outline-none"
         onInput={emit}
         onKeyDown={key}
         onPaste={(event) => {
@@ -195,6 +294,9 @@ export function PromptEditor({
           emit();
         }}
       />
+      <div className="flex h-9 items-center justify-end gap-2 px-2 pb-1">
+        {footer}
+      </div>
       {menu ? (
         <div
           className="absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border bg-white p-2 shadow-xl"

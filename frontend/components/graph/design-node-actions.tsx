@@ -12,6 +12,9 @@ type DesignNodeActions = {
   collapseVersion: (versionId: string) => void;
   viewVersions: (versionIds: string[]) => void;
   viewMesh: (versionId: string) => void;
+  showMesh: (nodeId: string) => void;
+  disconnectSubject: (nodeId: string) => void;
+  deleteWire: (edgeId: string) => void;
   viewImage: (nodeId: string) => void;
   duplicateNode: (nodeId: string) => void;
   deleteNode: (nodeId: string) => void;
@@ -20,7 +23,7 @@ type DesignNodeActions = {
   editMask: (nodeId: string) => void;
   updateDocument: (nodeId: string, document: PromptPart[]) => void;
   candidates: (nodeId: string) => { id: string; title: string }[];
-  hoverNode: (nodeId: string | null) => void;
+  hoverWire: (nodeId: string | null) => void;
   jumpNode: (nodeId: string) => void;
 };
 

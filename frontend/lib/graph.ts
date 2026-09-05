@@ -89,6 +89,7 @@ export type GraphDocument = {
 };
 
 export type SubjectPreview = {
+  edgeId: string;
   nodeId: string;
   deleted: boolean;
   nodeTitle: string;
@@ -117,12 +118,19 @@ export type DesignNodeData = {
   run: NodeRunState;
   draftError: string | null;
   meshPreview: { versionId: string; url: string } | null;
+  previewMode: "image" | "mesh";
+  saveState: "saved" | "saving" | "failed";
+  highlightedWireId: string | null;
 } & Record<string, unknown>;
 
 export type WorkspaceEdgeData = (
   { role: "subject"; pin: VersionPin } | { role: "connect"; pin: ActivePin }
-) &
-  Record<string, unknown>;
+) & {
+  number: number;
+  state: "ready" | "empty" | "deleted";
+  highlighted?: boolean;
+  dimmed?: boolean;
+} & Record<string, unknown>;
 
 export type WorkspaceNode = Node<DesignNodeData, "design">;
 export type WorkspaceEdge = Edge<WorkspaceEdgeData>;
@@ -379,7 +387,7 @@ export function toWorkspaceGraph(graph: GraphDocument): {
       .map((edge) => [edge.target_node_id, edge]),
   );
 
-  return {
+  const workspace: { nodes: WorkspaceNode[]; edges: WorkspaceEdge[] } = {
     nodes: graph.nodes
       .filter((node) => !node.deleted)
       .map((node) => {
@@ -394,6 +402,7 @@ export function toWorkspaceGraph(graph: GraphDocument): {
         const subject =
           edge && source && pinned
             ? {
+                edgeId: edge.id,
                 nodeId: source.id,
                 deleted: source.deleted,
                 nodeTitle: source.title,
@@ -413,6 +422,9 @@ export function toWorkspaceGraph(graph: GraphDocument): {
             activeVersionId: node.active_version_id,
             versions: node.versions,
             meshPreview: null,
+            previewMode: "image",
+            saveState: "saved",
+            highlightedWireId: null,
             subject,
             mask: node.mask,
             document: node.document,
@@ -443,10 +455,27 @@ export function toWorkspaceGraph(graph: GraphDocument): {
     edges: graph.edges
       .filter(
         (edge) =>
-          !nodesById.get(edge.source_node_id)?.deleted &&
+          edge.role === "subject" &&
           !nodesById.get(edge.target_node_id)?.deleted,
       )
-      .map(toWorkspaceEdge),
+      .map((edge) => ({
+        id: edge.id,
+        type: "role",
+        source: edge.source_node_id,
+        target: edge.target_node_id,
+        sourceHandle: "subject",
+        targetHandle: "subject",
+        data: {
+          role: "subject" as const,
+          pin: edge.pin as VersionPin,
+          number: 1,
+          state: "ready" as const,
+        },
+      })),
+  };
+  return {
+    nodes: workspace.nodes,
+    edges: workspaceWires(workspace.nodes, workspace.edges),
   };
 }
 
@@ -460,22 +489,65 @@ export function runDisplay(job: RunJob | null): NodeRunState {
   return { status: "running", job, startedAt: job.created_at };
 }
 
-function toWorkspaceEdge(edge: PersistedGraphEdge): WorkspaceEdge {
-  return {
-    id: edge.id,
-    source: edge.source_node_id,
-    target: edge.target_node_id,
-    sourceHandle: "source",
-    targetHandle: edge.role,
-    style:
-      edge.role === "subject"
-        ? { stroke: "#0284c7", strokeWidth: 2 }
-        : { stroke: "#a855f7", strokeWidth: 2, strokeDasharray: "5 4" },
-    data:
-      edge.role === "subject"
-        ? { role: "subject", pin: edge.pin }
-        : { role: "connect", pin: edge.pin },
-  };
+// Numbering follows compile_document: origin references start at 1; a subject
+// occupies image 1 on edit nodes. Derive wires from the same draft as the chips.
+export function referenceNumber(index: number, hasSubject: boolean): number {
+  return index + (hasSubject ? 2 : 1);
+}
+
+export function workspaceWires(
+  nodes: WorkspaceNode[],
+  edges: WorkspaceEdge[],
+): WorkspaceEdge[] {
+  const ids = new Set(nodes.map((node) => node.id));
+  return [
+    ...edges.filter(
+      (edge) =>
+        edge.data?.role === "subject" &&
+        ids.has(edge.source) &&
+        ids.has(edge.target),
+    ),
+    ...nodes.flatMap((target) =>
+      target.data.connects.map((ref, index): WorkspaceEdge => ({
+        id: ref.edgeId,
+        type: "role",
+        source: ids.has(ref.nodeId) ? ref.nodeId : target.id,
+        target: target.id,
+        sourceHandle: "connect",
+        targetHandle: "connect",
+        selected: edges.find((edge) => edge.id === ref.edgeId)?.selected,
+        data: {
+          role: "connect",
+          pin: { mode: "active" },
+          number: referenceNumber(index, !!target.data.subject),
+          state: ref.state,
+        },
+      })),
+    ),
+  ].map((edge) => ({
+    ...edge,
+    ariaLabel: `${edge.data?.role === "subject" ? "Subject" : "Reference"} image ${edge.data?.number}`,
+    interactionWidth: 24,
+  }));
+}
+
+export function runBlockingReason(data: DesignNodeData): string | null {
+  if (data.remoteDeleted) return "Node deleted — copy the draft to a new node.";
+  if (data.connects.some((ref) => ref.state === "deleted"))
+    return "Source node deleted — remove the reference.";
+  if (data.connects.some((ref) => ref.state === "empty"))
+    return "Reference has no image — run its source.";
+  if (
+    data.mask &&
+    data.mask.rle !== `1 ${data.mask.width * data.mask.height}` &&
+    data.connects.length > 0
+  )
+    return "Area selection blocks references — clear it.";
+  if (data.mask && data.mask.subject_version_id !== data.subject?.versionId)
+    return "Different subject version — select the area again.";
+  if (!data.prompt.trim()) return "Enter a prompt.";
+  if (data.run.status === "running") return "Run in progress.";
+  return null;
 }
 
 async function apiRequest<T>(input: string, init?: RequestInit): Promise<T> {

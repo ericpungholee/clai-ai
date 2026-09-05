@@ -36,6 +36,9 @@ import {
   replaceSubjectEdge,
   submitRun,
   savePrompt,
+  saveMask,
+  workspaceWires,
+  runBlockingReason,
   runDisplay,
   setVersionHidden,
   type PromptPart,
@@ -46,6 +49,8 @@ import {
   type Version,
 } from "@/lib/graph";
 
+import { RoleEdge } from "./role-edge";
+import { ConfirmDialog, type Confirmation } from "./confirm-dialog";
 import { AddNodeControl } from "./add-node-control";
 import { DesignNode } from "./design-node";
 import { MaskEditor } from "./mask-editor";
@@ -57,9 +62,8 @@ import { SaveStatus, type SaveState } from "./save-status";
 
 const nodeTypes = { design: DesignNode } satisfies NodeTypes;
 const fitViewOptions = { padding: 0.2, maxZoom: 1 };
-const defaultEdgeOptions = {
-  style: { stroke: "#0284c7", strokeWidth: 1.75 },
-};
+const edgeTypes = { role: RoleEdge };
+const defaultEdgeOptions = { type: "role", interactionWidth: 24 };
 
 function findAvailablePosition(
   origin: { x: number; y: number },
@@ -112,6 +116,16 @@ export function GraphWorkspace({
   );
   const [nodes, setNodes] = useState(initialWorkspace.nodes);
   const [edges, setEdges] = useState(initialWorkspace.edges);
+  const [hoveredWire, setHoveredWire] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const confirm = useCallback(
+    (message: string, verb: string) =>
+      new Promise<boolean>((resolve) =>
+        setConfirmation({ message, verb, resolve }),
+      ),
+    [],
+  );
+  const disconnectingSubjects = useRef(new Set<string>());
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [maskNodeId, setMaskNodeId] = useState<string | null>(null);
@@ -149,6 +163,16 @@ export function GraphWorkspace({
     };
   }, []);
 
+  const setNodeSaveState = useCallback((id: string, state: SaveState) => {
+    const next = nodesRef.current.map((node) =>
+      node.id === id
+        ? { ...node, data: { ...node.data, saveState: state } }
+        : node,
+    );
+    nodesRef.current = next;
+    setNodes(next);
+  }, []);
+
   const replaceWorkspace = useCallback((graph: GraphDocument) => {
     allVersions.current = new Map(
       graph.nodes
@@ -156,49 +180,63 @@ export function GraphWorkspace({
         .map((version) => [version.id, version]),
     );
     const workspace = toWorkspaceGraph(graph);
-    workspace.nodes = workspace.nodes.map((node) => {
-      const current = nodesRef.current.find((item) => item.id === node.id);
-      if (!current) return node;
-      const document = pendingDocuments.current.get(node.id);
-      const patch = pendingPatches.current.get(node.id);
-      return {
-        ...node,
-        selected: current.selected,
-        measured: current.measured,
-        dragging: current.dragging,
-        position:
-          current.dragging || patch?.position
-            ? current.position
-            : node.position,
-        data: {
-          ...node.data,
-          ...(document
-            ? {
-                document,
-                prompt: current.data.prompt,
-                connects: current.data.connects,
-              }
-            : {}),
-          ...(patch?.title !== undefined ? { title: current.data.title } : {}),
-          ...(patch?.settings !== undefined
-            ? { settings: current.data.settings }
-            : {}),
-          revision:
-            document || patch ? current.data.revision : node.data.revision,
-          run:
-            current.data.run.status === "running" &&
-            (!current.data.run.job ||
-              graph.nodes.find((item) => item.id === node.id)?.run?.id !==
-                current.data.run.job.id)
-              ? current.data.run
-              : node.data.run,
-          meshPreview: current.data.meshPreview,
-          draftError: current.data.draftError,
-        },
-      };
-    });
+    workspace.nodes = workspace.nodes
+      .filter((node) => !deletingNodes.current.has(node.id))
+      .map((node) => {
+        const current = nodesRef.current.find((item) => item.id === node.id);
+        if (!current) return node;
+        const document = pendingDocuments.current.get(node.id);
+        const patch = pendingPatches.current.get(node.id);
+        return {
+          ...node,
+          selected: current.selected,
+          measured: current.measured,
+          dragging: current.dragging,
+          position:
+            current.dragging || patch?.position
+              ? current.position
+              : node.position,
+          data: {
+            ...node.data,
+            ...(document
+              ? {
+                  document,
+                  prompt: current.data.prompt,
+                  connects: current.data.connects,
+                }
+              : {}),
+            ...(patch?.title !== undefined
+              ? { title: current.data.title }
+              : {}),
+            ...(patch?.settings !== undefined
+              ? { settings: current.data.settings }
+              : {}),
+            revision:
+              document || patch ? current.data.revision : node.data.revision,
+            run:
+              current.data.run.status === "running" &&
+              (!current.data.run.job ||
+                graph.nodes.find((item) => item.id === node.id)?.run?.id !==
+                  current.data.run.job.id)
+                ? current.data.run
+                : node.data.run,
+            ...(disconnectingSubjects.current.has(node.id)
+              ? { subject: null, mask: null }
+              : {}),
+            meshPreview: current.data.meshPreview,
+            previewMode: current.data.previewMode,
+            draftError: current.data.draftError,
+            saveState: current.data.draftError
+              ? "failed"
+              : document || patch
+                ? "saving"
+                : "saved",
+          },
+        };
+      });
     for (const current of nodesRef.current) {
       if (
+        !deletingNodes.current.has(current.id) &&
         !workspace.nodes.some((node) => node.id === current.id) &&
         (pendingDocuments.current.has(current.id) ||
           pendingPatches.current.has(current.id))
@@ -214,6 +252,18 @@ export function GraphWorkspace({
         });
       }
     }
+    workspace.edges = workspaceWires(
+      workspace.nodes,
+      workspace.edges.filter(
+        (edge) =>
+          !disconnectingSubjects.current.has(edge.target) ||
+          edge.data?.role !== "subject",
+      ),
+    ).map((edge) => ({
+      ...edge,
+      selected: edgesRef.current.find((current) => current.id === edge.id)
+        ?.selected,
+    }));
     nodesRef.current = workspace.nodes;
     edgesRef.current = workspace.edges;
     setNodes(workspace.nodes);
@@ -263,9 +313,11 @@ export function GraphWorkspace({
         .catch(() => undefined)
         .then(async () => {
           setSaveState("saving");
+          setNodeSaveState(nodeId, "saving");
           const pending = pendingPatches.current.get(nodeId);
           const document = pendingDocuments.current.get(nodeId);
-          if (!pending && !document) return;
+          if ((!pending && !document) || deletingNodes.current.has(nodeId))
+            return;
           try {
             let revision = nodesRef.current.find((node) => node.id === nodeId)!
               .data.revision;
@@ -329,6 +381,13 @@ export function GraphWorkspace({
               nodesRef.current = updated;
               setNodes(updated);
             }
+            setNodeSaveState(
+              nodeId,
+              pendingDocuments.current.has(nodeId) ||
+                pendingPatches.current.has(nodeId)
+                ? "saving"
+                : "saved",
+            );
             if (mountedRef.current)
               setSaveState(
                 pendingDocuments.current.size || pendingPatches.current.size
@@ -354,7 +413,7 @@ export function GraphWorkspace({
       saves.current.set(nodeId, save);
       return save;
     },
-    [projectId, replaceWorkspace],
+    [projectId, replaceWorkspace, setNodeSaveState],
   );
 
   const scheduleNodePatch = useCallback(
@@ -363,6 +422,7 @@ export function GraphWorkspace({
         ...pendingPatches.current.get(nodeId),
         ...patch,
       });
+      setNodeSaveState(nodeId, "saving");
       const currentTimer = patchTimersRef.current.get(nodeId);
       if (currentTimer !== undefined) window.clearTimeout(currentTimer);
       setSaveState("saving");
@@ -372,7 +432,7 @@ export function GraphWorkspace({
       }, 500);
       patchTimersRef.current.set(nodeId, timer);
     },
-    [persistNodePatch],
+    [persistNodePatch, setNodeSaveState],
   );
 
   const updateNodeData = useCallback(
@@ -507,6 +567,9 @@ export function GraphWorkspace({
           .map((part) => (part.type === "text" ? part.text : "@"))
           .join(""),
       });
+      const wires = workspaceWires(nodesRef.current, edgesRef.current);
+      edgesRef.current = wires;
+      setEdges(wires);
       scheduleNodePatch(nodeId, {});
     },
     [scheduleNodePatch, updateNodeData],
@@ -514,31 +577,22 @@ export function GraphWorkspace({
 
   const updateTitle = useCallback(
     (nodeId: string, title: string) => {
-      setNodes((current) => {
-        const next = current.map((node) => {
-          if (node.id === nodeId) {
-            return { ...node, data: { ...node.data, title } };
-          }
-          const currentSubject = node.data.subject;
-          if (currentSubject !== null && currentSubject.nodeId === nodeId) {
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                subject: {
-                  ...currentSubject,
-                  nodeTitle: title,
-                  versionId: currentSubject.versionId,
-                  artifactUrl: currentSubject.artifactUrl,
-                },
-              },
-            };
-          }
-          return node;
-        });
-        nodesRef.current = next;
-        return next;
-      });
+      const next = nodesRef.current.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          ...(node.id === nodeId ? { title } : {}),
+          subject:
+            node.data.subject?.nodeId === nodeId
+              ? { ...node.data.subject, nodeTitle: title }
+              : node.data.subject,
+          connects: node.data.connects.map((ref) =>
+            ref.nodeId === nodeId ? { ...ref, title } : ref,
+          ),
+        },
+      }));
+      nodesRef.current = next;
+      setNodes(next);
       if (title.trim()) scheduleNodePatch(nodeId, { title });
     },
     [scheduleNodePatch],
@@ -557,6 +611,46 @@ export function GraphWorkspace({
     [scheduleNodePatch, updateNodeData],
   );
 
+  const disconnectSubject = useCallback(
+    async (nodeId: string, approved = false) => {
+      const node = nodesRef.current.find((node) => node.id === nodeId);
+      if (!node?.data.subject) return;
+      if (
+        node.data.mask &&
+        !approved &&
+        !(await confirm(
+          "Disconnect subject? The saved area selection will be cleared.",
+          "Disconnect",
+        ))
+      )
+        return;
+      const subject = node.data.subject;
+      disconnectingSubjects.current.add(nodeId);
+      updateNodeData(nodeId, { subject: null, mask: null });
+      const remaining = edgesRef.current.filter(
+        (edge) => edge.target !== nodeId || edge.data?.role !== "subject",
+      );
+      edgesRef.current = workspaceWires(nodesRef.current, remaining);
+      setEdges(edgesRef.current);
+      try {
+        await saves.current.get(nodeId)?.catch(() => undefined);
+        // Clear first: a failed disconnect can keep its subject, never a stranded mask.
+        if (node.data.mask) await saveMask(projectId, nodeId, null);
+        await deleteSubjectEdge(projectId, nodeId);
+        disconnectingSubjects.current.delete(nodeId);
+        await refreshWorkspace();
+      } catch {
+        disconnectingSubjects.current.delete(nodeId);
+        updateNodeData(nodeId, {
+          subject,
+          draftError: "Disconnect failed — try again.",
+        });
+        await refreshWorkspace().catch(() => setSaveState("failed"));
+      }
+    },
+    [confirm, projectId, refreshWorkspace, updateNodeData],
+  );
+
   const onNodesChange = useCallback(
     (changes: NodeChange<WorkspaceNode>[]) => {
       const removedIds = changes
@@ -568,11 +662,23 @@ export function GraphWorkspace({
       const settledPositions = changes.filter(
         (change) => change.type === "position" && change.dragging === false,
       );
-      setNodes((current) => {
-        const next = applyNodeChanges(changes, current);
-        nodesRef.current = next;
-        return next;
-      });
+      const next = applyNodeChanges(changes, nodesRef.current).map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          subject:
+            node.data.subject && removedIds.includes(node.data.subject.nodeId)
+              ? { ...node.data.subject, deleted: true }
+              : node.data.subject,
+          connects: node.data.connects.map((ref) =>
+            removedIds.includes(ref.nodeId)
+              ? { ...ref, state: "deleted" as const }
+              : ref,
+          ),
+        },
+      }));
+      nodesRef.current = next;
+      setNodes(next);
       for (const change of settledPositions) {
         if (change.type === "position" && change.position) {
           void persistNodePatch(change.id, { position: change.position }).catch(
@@ -582,9 +688,13 @@ export function GraphWorkspace({
       }
       for (const node of removedNodes) {
         // Remote-deleted drafts only exist locally; removing one needs no server mutation.
-        const removal = node.data.remoteDeleted
-          ? Promise.resolve()
-          : deleteDesignNode(projectId, node.id);
+        const removal = (saves.current.get(node.id) ?? Promise.resolve())
+          .catch(() => undefined)
+          .then(() =>
+            node.data.remoteDeleted
+              ? undefined
+              : deleteDesignNode(projectId, node.id),
+          );
         void removal
           .then(() => {
             pendingDocuments.current.delete(node.id);
@@ -604,6 +714,7 @@ export function GraphWorkspace({
             nodesRef.current = restored;
             setNodes(restored);
             setSaveState("failed");
+            void refreshWorkspace().catch(() => undefined);
           });
       }
     },
@@ -616,16 +727,15 @@ export function GraphWorkspace({
         .filter((change) => change.type === "remove")
         .map((change) => edgesRef.current.find((edge) => edge.id === change.id))
         .filter((edge): edge is WorkspaceEdge => edge !== undefined);
-      setEdges((current) => {
-        const next = applyEdgeChanges(changes, current);
-        edgesRef.current = next;
-        return next;
-      });
+      const next = applyEdgeChanges(changes, edgesRef.current);
+      edgesRef.current = next;
+      setEdges(next);
       for (const edge of removed) {
         if (
           deletingNodes.current.has(edge.source) ||
           deletingNodes.current.has(edge.target) ||
-          !nodesRef.current.some((node) => node.id === edge.source) ||
+          (edge.data?.state !== "deleted" &&
+            !nodesRef.current.some((node) => node.id === edge.source)) ||
           !nodesRef.current.some((node) => node.id === edge.target)
         )
           continue;
@@ -642,12 +752,10 @@ export function GraphWorkspace({
             );
           continue;
         }
-        void deleteSubjectEdge(projectId, edge.target).catch(() =>
-          setSaveState("failed"),
-        );
+        void disconnectSubject(edge.target, true);
       }
     },
-    [projectId, updateDocument],
+    [disconnectSubject, updateDocument],
   );
 
   const onConnect = useCallback(
@@ -766,8 +874,7 @@ export function GraphWorkspace({
       const node = nodesRef.current.find(
         (candidate) => candidate.id === nodeId,
       );
-      if (!node || !node.data.prompt.trim()) return;
-      if (node.data.run.status === "running") return;
+      if (!node || runBlockingReason(node.data)) return;
       const timer = patchTimersRef.current.get(nodeId);
       if (timer !== undefined) {
         window.clearTimeout(timer);
@@ -825,6 +932,10 @@ export function GraphWorkspace({
       branchVersion,
       runNode,
       editMask: setMaskNodeId,
+      disconnectSubject,
+      deleteWire: (id: string) => {
+        void flowInstanceRef.current?.deleteElements({ edges: [{ id }] });
+      },
       duplicateNode,
       deleteNode: (id: string) => {
         void flowInstanceRef.current?.deleteElements({ nodes: [{ id }] });
@@ -838,7 +949,9 @@ export function GraphWorkspace({
             .find((version) => version.id === id) ?? null,
         ),
       viewImage: (nodeId: string) =>
-        updateNodeData(nodeId, { meshPreview: null }),
+        updateNodeData(nodeId, { previewMode: "image" }),
+      showMesh: (nodeId: string) =>
+        updateNodeData(nodeId, { previewMode: "mesh" }),
       viewVersions: (ids: string[]) =>
         setViewedVersions(
           ids.flatMap((id) => {
@@ -848,7 +961,14 @@ export function GraphWorkspace({
         ),
       hideVersion: (versionId: string, hidden: boolean) => {
         void setVersionHidden(projectId, versionId, hidden)
-          .then(refreshWorkspace)
+          .then(async () => {
+            await refreshWorkspace();
+            const restored = nodesRef.current.find((node) =>
+              node.data.versions.some((version) => version.id === versionId),
+            );
+            if (!hidden && restored && !restored.data.activeVersionId)
+              selectVersion(restored.id, versionId);
+          })
           .catch(() => setSaveState("failed"));
       },
       updateDocument,
@@ -856,20 +976,12 @@ export function GraphWorkspace({
         nodesRef.current
           .filter((node) => node.id !== id)
           .map((node) => ({ id: node.id, title: node.data.title })),
-      hoverNode: (id: string | null) =>
-        setNodes((current) =>
-          current.map((node) => ({
-            ...node,
-            style: {
-              ...node.style,
-              outline: node.id === id ? "3px solid #a855f7" : undefined,
-            },
-          })),
-        ),
+      hoverWire: setHoveredWire,
       jumpNode: focusNode,
     }),
     [
       branchVersion,
+      disconnectSubject,
       runNode,
       selectVersion,
       updateTitle,
@@ -893,7 +1005,15 @@ export function GraphWorkspace({
       document.querySelector("dialog[open]")
     )
       return;
+    if (event.key === "Escape") {
+      setHoveredWire(null);
+      return;
+    }
     const selected = nodesRef.current.find((node) => node.selected);
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && selected) {
+      event.preventDefault();
+      void runNode(selected.id);
+    }
     if (event.key.toLowerCase() === "n" && !event.metaKey && !event.ctrlKey) {
       event.preventDefault();
       void addNode();
@@ -921,9 +1041,42 @@ export function GraphWorkspace({
     }
   };
 
+  const activeWire =
+    hoveredWire ?? edges.find((edge) => edge.selected)?.id ?? null;
+  const displayEdges = workspaceWires(nodes, edges).map((edge) => ({
+    ...edge,
+    data: edge.data
+      ? {
+          ...edge.data,
+          highlighted: edge.id === activeWire,
+          dimmed: !!activeWire && edge.id !== activeWire,
+        }
+      : edge.data,
+  }));
+  const highlighted = displayEdges.find((edge) => edge.id === activeWire);
+  const displayNodes = nodes.map((node) => ({
+    ...node,
+    style: {
+      ...node.style,
+      outline:
+        highlighted &&
+        (node.id === highlighted.source || node.id === highlighted.target)
+          ? "2px solid var(--wire-subject)"
+          : undefined,
+      borderRadius: "6px",
+    },
+    data: { ...node.data, highlightedWireId: activeWire },
+  }));
+
   return (
     <DesignNodeActionsContext.Provider value={actions}>
       <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-white">
+        {confirmation ? (
+          <ConfirmDialog
+            confirmation={confirmation}
+            onClose={() => setConfirmation(null)}
+          />
+        ) : null}
         {meshVersion ? (
           <MeshViewer
             key={meshVersion.id}
@@ -935,13 +1088,21 @@ export function GraphWorkspace({
                 node.data.versions.some((version) => version.id === versionId),
               );
               if (node)
-                updateNodeData(node.id, { meshPreview: { versionId, url } });
+                updateNodeData(node.id, {
+                  meshPreview: { versionId, url },
+                  previewMode: "mesh",
+                });
             }}
           />
         ) : null}
         {viewedVersions.length > 0 ? (
           <ImageViewer
             versions={viewedVersions}
+            comparisonVersions={nodes
+              .flatMap((node) => node.data.versions)
+              .filter(
+                (version) => version.node_id === viewedVersions[0]?.node_id,
+              )}
             onClose={() => setViewedVersions([])}
           />
         ) : null}
@@ -1036,7 +1197,42 @@ export function GraphWorkspace({
         >
           <ReactFlow<WorkspaceNode, WorkspaceEdge>
             defaultEdgeOptions={defaultEdgeOptions}
+            edgeTypes={edgeTypes}
+            connectOnClick
+            isValidConnection={(connection) => {
+              const source = nodesRef.current.find(
+                (node) => node.id === connection.source,
+              );
+              const target = nodesRef.current.find(
+                (node) => node.id === connection.target,
+              );
+              if (
+                !source ||
+                !target ||
+                source.id === target.id ||
+                connection.sourceHandle !== connection.targetHandle
+              )
+                return false;
+              return connection.targetHandle === "subject"
+                ? !!source.data.activeVersionId
+                : target.data.connects.length < 2 &&
+                    !target.data.connects.some(
+                      (ref) => ref.nodeId === source.id,
+                    );
+            }}
+            onEdgeMouseEnter={(_, edge) => setHoveredWire(edge.id)}
+            onEdgeMouseLeave={(event, edge) => {
+              if (
+                event.relatedTarget instanceof Element &&
+                event.relatedTarget.closest(`[data-wire-id="${edge.id}"]`)
+              )
+                return;
+              setHoveredWire((current) =>
+                current === edge.id ? null : current,
+              );
+            }}
             deleteKeyCode={
+              confirmation ||
               maskNodeId ||
               viewedVersions.length > 0 ||
               collapseVersionId ||
@@ -1044,11 +1240,11 @@ export function GraphWorkspace({
                 ? null
                 : ["Backspace", "Delete"]
             }
-            edges={edges}
+            edges={displayEdges}
             fitView
             fitViewOptions={fitViewOptions}
             nodeTypes={nodeTypes}
-            nodes={nodes}
+            nodes={displayNodes}
             onlyRenderVisibleElements
             minZoom={0.1}
             maxZoom={2}
@@ -1063,34 +1259,61 @@ export function GraphWorkspace({
             }}
             onNodesChange={onNodesChange}
             onPaneClick={() => canvasRef.current?.focus()}
-            onBeforeDelete={async ({ nodes: removing }) => {
-              const approved =
-                removing.length === 0 ||
-                (!edgesRef.current.some((edge) =>
-                  removing.some((node) => node.id === edge.source),
-                ) &&
+            onBeforeDelete={async ({ nodes: removing, edges: connections }) => {
+              if (document.querySelector("dialog[open]")) return false;
+              const explicitConnections = connections.filter(
+                (edge) =>
                   !removing.some(
                     (node) =>
-                      pendingDocuments.current.has(node.id) ||
-                      pendingPatches.current.has(node.id),
-                  )) ||
-                window.confirm(
-                  "Delete these concepts and their unsaved drafts? Connected prompts will keep broken chips until you replace or remove them. Historical images are retained.",
-                );
+                      node.id === edge.source || node.id === edge.target,
+                  ),
+              );
+              let message: string | null = null;
+              let verb = "Delete node";
+              if (removing.length + explicitConnections.length > 1) {
+                message = `Delete ${removing.length} nodes and ${explicitConnections.length} connections?`;
+                verb = "Delete";
+              } else if (removing.length === 1) {
+                const node = removing[0];
+                const count = node.data.versions.length;
+                const dependents = nodesRef.current.filter(
+                  (target) =>
+                    target.id !== node.id &&
+                    (target.data.subject?.nodeId === node.id ||
+                      target.data.connects.some(
+                        (ref) => ref.nodeId === node.id,
+                      )),
+                ).length;
+                if (count || dependents)
+                  message = dependents
+                    ? `Delete "${node.data.title}"? Its ${count} ${count === 1 ? "image stays" : "images stay"} available to the ${dependents} ${dependents === 1 ? "node" : "nodes"} using them.`
+                    : `Delete "${node.data.title}"? Its ${count} ${count === 1 ? "image" : "images"} will no longer appear on the canvas.`;
+                else if (
+                  pendingDocuments.current.has(node.id) ||
+                  pendingPatches.current.has(node.id)
+                )
+                  message =
+                    "Delete this node? Unsaved changes to the prompt will be lost.";
+              } else if (
+                connections.some(
+                  (edge) =>
+                    edge.data?.role === "subject" &&
+                    nodesRef.current.find((node) => node.id === edge.target)
+                      ?.data.mask,
+                )
+              ) {
+                message =
+                  "Disconnect subject? The saved area selection will be cleared.";
+                verb = "Disconnect";
+              }
+              const approved = !message || (await confirm(message, verb));
               if (approved) {
-                deletingNodes.current = new Set(
-                  removing.map((node) => node.id),
-                );
                 for (const node of removing) {
+                  deletingNodes.current.add(node.id);
                   const timer = patchTimersRef.current.get(node.id);
                   if (timer !== undefined) clearTimeout(timer);
                   patchTimersRef.current.delete(node.id);
                 }
-                await Promise.all(
-                  removing.map((node) =>
-                    saves.current.get(node.id)?.catch(() => undefined),
-                  ),
-                );
               }
               return approved;
             }}
@@ -1101,28 +1324,29 @@ export function GraphWorkspace({
               size={1}
               variant={BackgroundVariant.Dots}
             />
-            <Panel position="top-left">
-              <AddNodeControl onAdd={() => void addNode()} />
-            </Panel>
+            {nodes.length > 0 ? (
+              <Panel position="top-left">
+                <AddNodeControl onAdd={() => void addNode()} />
+              </Panel>
+            ) : null}
             <Panel position="bottom-right">
-              <p className="rounded bg-white/90 px-3 py-2 text-[10px] text-neutral-500">
-                N new · B branch · ⌘/Ctrl D duplicate · F fit · Shift select ·
-                Space drag to pan · Delete
-              </p>
+              <button
+                aria-label="Keyboard shortcuts"
+                title="N: New node; B: Branch; Cmd/Ctrl D: Duplicate; F: Fit; Shift: Select; Space: Pan; Delete: Delete; Cmd/Ctrl Enter: Run; @: Reference; Escape: Close"
+                className="rounded border bg-white px-2 py-1 text-neutral-500"
+              >
+                ?
+              </button>
             </Panel>
             {nodes.length === 0 ? (
               <Panel position="top-center">
                 <div className="mt-20 max-w-sm rounded-xl border bg-white p-5 text-center shadow-sm">
                   <h2 className="font-semibold">Start with one object</h2>
-                  <p className="mt-2 text-sm text-neutral-500">
-                    Add a node, describe a product, and run it. Branch from a
-                    good image to explore another direction.
-                  </p>
                   <button
                     className="mt-3 rounded bg-neutral-900 px-4 py-2 text-sm text-white"
                     onClick={() => void addNode()}
                   >
-                    Add your first node
+                    Add node
                   </button>
                 </div>
               </Panel>

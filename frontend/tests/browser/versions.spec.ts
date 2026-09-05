@@ -20,17 +20,26 @@ test("fifteen numbered versions stay navigable, inspectable, comparable and reta
   );
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await source.getByLabel("Compare active version to").selectOption("subject");
+  await source.getByRole("button", { name: "Inspect active image" }).click();
+  await page.getByLabel("Compare active version to").selectOption("subject");
   await expect(page.getByRole("dialog").getByRole("img")).toHaveCount(2);
   await page.keyboard.press("Escape");
+  await source.getByRole("button", { name: "Version 15 actions" }).focus();
   await source
+    .getByRole("button", { name: "Version 15 actions" })
+    .press("Enter");
+  await page
     .getByRole("button", { name: "Hide version 15", exact: true })
     .click();
   await expect(
     source.getByRole("button", { name: "Select version 15", exact: true }),
   ).toHaveCount(0);
   await source.getByRole("button", { name: "Show retained" }).click();
+  await source.getByRole("button", { name: "Version 15 actions" }).focus();
   await source
+    .getByRole("button", { name: "Version 15 actions" })
+    .press("Enter");
+  await page
     .getByRole("button", { name: "Restore version 15", exact: true })
     .click();
   await expect(

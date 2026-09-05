@@ -75,7 +75,7 @@ test("home rename/delete and a new project's empty canvas are usable", async ({
     .getByRole("button", { name: "New Project", exact: true })
     .first()
     .click();
-  await page.getByRole("button", { name: "Add your first node" }).click();
+  await page.getByRole("button", { name: "Add node" }).click();
   await expect(
     page.getByRole("textbox", { name: "Design prompt" }),
   ).toHaveCount(1);
@@ -90,22 +90,24 @@ test("run progress survives reload and completion preserves the newer editable d
   const editor = node.getByRole("textbox", { name: "Design prompt" });
   await editor.fill("Frozen run instruction");
   await node.getByRole("button", { name: "Run", exact: true }).click();
-  await expect(node.getByText(/Waiting for a worker/)).toBeVisible();
+  await expect(node.getByText(/Queued/)).toBeVisible();
   await page.reload();
-  await expect(node.getByText(/Waiting for a worker/)).toBeVisible();
+  await expect(node.getByText(/Queued/)).toBeVisible();
   await editor.fill("A newer draft during generation");
   await request.post("http://127.0.0.1:8109/finish-run");
   await expect(
     node.getByRole("button", { name: "Inspect active image" }),
   ).toBeVisible();
   await expect(editor).toHaveText("A newer draft during generation");
-  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("status", { name: "Saved", exact: true }).first(),
+  ).toBeVisible();
   await page.reload();
   await expect(editor).toHaveText("A newer draft during generation");
   await node.getByRole("button", { name: "Run", exact: true }).click();
-  await expect(node.getByText(/Waiting for a worker/)).toBeVisible();
+  await expect(node.getByText(/Queued/)).toBeVisible();
   await request.post("http://127.0.0.1:8109/fail-run");
-  await expect(node.getByRole("button", { name: "Retry run" })).toBeEnabled();
+  await expect(node.getByRole("button", { name: "Retry" })).toBeEnabled();
   await expect(editor).toHaveText("A newer draft during generation");
 });
 
@@ -124,10 +126,18 @@ test("two tabs reject a stale save and let the user explicitly keep their draft"
     .getByRole("textbox", { name: "Design prompt" });
   await firstEditor.fill("First tab draft");
   await secondEditor.fill("Second tab draft");
-  await expect(second.getByText("Prompt changed in another tab")).toBeVisible();
+  await expect(
+    second.locator('[data-id="target"]').getByRole("alert"),
+  ).toContainText("Draft changed");
+  await second.getByRole("button", { name: "Resolve draft" }).click();
+  await expect(
+    second.getByText("Prompt changed in another tab").filter({ visible: true }),
+  ).toBeVisible();
   await expect(secondEditor).toHaveText("Second tab draft");
   await second.getByRole("button", { name: "Keep my draft" }).click();
-  await expect(second.getByText("Saved", { exact: true })).toBeVisible();
+  await expect(
+    second.getByRole("status", { name: "Saved", exact: true }).first(),
+  ).toBeVisible();
   await second.reload();
   await expect(secondEditor).toHaveText("Second tab draft");
 });
@@ -142,15 +152,26 @@ test("dependent deletion keeps a broken chip visible", async ({ page }) => {
   await editor.press("@");
   await page.getByRole("button", { name: "Desk lamp", exact: true }).click();
   await expect(editor.locator('[contenteditable="false"]')).toHaveText(
-    "@Desk lamp",
+    "2@Desk lamp",
   );
-  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
-  page.once("dialog", (dialog) => dialog.accept());
+  await expect(
+    page.getByRole("status", { name: "Saved", exact: true }).first(),
+  ).toBeVisible();
   await page
     .locator('[data-id="source"]')
+    .getByRole("button", { name: "Node actions" })
+    .click();
+  await page.getByRole("button", { name: "Delete node" }).click();
+  await expect(
+    page.getByRole("dialog").getByRole("button", { name: "Cancel" }),
+  ).toBeFocused();
+  await page
+    .getByRole("dialog")
     .getByRole("button", { name: "Delete node" })
     .click();
-  await expect(editor.getByText("@Desk lamp")).toBeVisible();
+  await expect(
+    editor.getByRole("button", { name: "Image 2: Desk lamp" }),
+  ).toBeVisible();
   await expect(
     page
       .locator('[data-id="target"]')
@@ -166,10 +187,15 @@ test("deleting an unsaved draft cancels its save and leaves no phantom changes",
   await target
     .getByRole("textbox", { name: "Design prompt" })
     .fill("Discard this draft");
-  page.once("dialog", (dialog) => dialog.accept());
-  await target.getByRole("button", { name: "Delete node" }).click();
+  await target.getByRole("button", { name: "Node actions" }).click();
+  await page.getByRole("button", { name: "Delete node", exact: true }).click();
+  const confirmation = page.getByRole("dialog");
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "Delete node" }).click();
   await expect(target).toHaveCount(0);
-  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("status", { name: "Saved", exact: true }).first(),
+  ).toBeVisible();
   // A stale pending-save entry would raise the unsaved-draft navigation confirmation.
   page.on("dialog", (dialog) => dialog.dismiss());
   await page.getByRole("link", { name: "← Projects" }).click();

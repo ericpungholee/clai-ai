@@ -1,43 +1,74 @@
-import { Handle, Position } from "@xyflow/react";
+import { Handle, Position, useConnection } from "@xyflow/react";
 import type { ReactNode } from "react";
+import type { DesignNodeData } from "@/lib/graph";
 
-type NodeFrameProps = {
+export function NodeFrame({
+  children,
+  selected,
+  title,
+  menu,
+  data,
+  id,
+}: {
   children: ReactNode;
   selected: boolean;
   title: ReactNode;
-};
-
-export function NodeFrame({ children, selected, title }: NodeFrameProps) {
+  menu: ReactNode;
+  data: DesignNodeData;
+  id: string;
+}) {
+  const connection = useConnection();
+  const fromId = connection.fromNode?.id;
+  const sourceRole = connection.fromHandle?.id;
   return (
     <div
-      className={`w-[19rem] rounded-[var(--radius-surface)] border bg-white text-foreground shadow-sm ${
-        selected ? "border-sky-500" : "border-neutral-300"
-      }`}
+      data-kind={data.subject ? "edit" : "origin"}
+      className={`design-card w-[19rem] rounded-[var(--radius-surface)] border bg-white text-foreground shadow-sm ${selected ? "border-blue-500" : "border-neutral-300"}`}
     >
-      <Handle
-        className="!h-2.5 !w-2.5 !border-2 !border-white !bg-neutral-400"
-        id="subject"
-        style={{ top: "35%", background: "#0284c7" }}
-        title="Subject · pins this version"
-        position={Position.Left}
-        type="target"
-      />
-      <Handle
-        className="!h-3 !w-3 !border-2 !border-white !bg-purple-500"
-        id="connect"
-        position={Position.Left}
-        type="target"
-        style={{ top: "70%" }}
-        title="Connect · follows active image"
-      />
-      <div className="border-b border-neutral-200 px-3 py-2">{title}</div>
-      <div className="p-3">{children}</div>
-      <Handle
-        className="!h-2.5 !w-2.5 !border-2 !border-white !bg-neutral-400"
-        id="source"
-        position={Position.Right}
-        type="source"
-      />
+      {(["subject", "connect"] as const).flatMap((role) =>
+        (["target", "source"] as const).map((type) => {
+          const available =
+            type === "source"
+              ? role === "connect" || !!data.activeVersionId
+              : role === "subject" || data.connects.length < 2;
+          const validDrag =
+            connection.inProgress &&
+            type === "target" &&
+            fromId !== id &&
+            sourceRole === role &&
+            available &&
+            !data.connects.some(
+              (ref) => role === "connect" && ref.nodeId === fromId,
+            );
+          return (
+            <Handle
+              key={`${type}-${role}`}
+              id={role}
+              type={type}
+              position={type === "target" ? Position.Left : Position.Right}
+              className={`wire-handle wire-${role === "connect" ? "reference" : "subject"} ${available ? "available" : ""} ${validDrag ? "valid-drop" : ""}`}
+              data-dragging={connection.inProgress || undefined}
+              aria-label={`${type === "source" ? "Start" : "Connect"} ${role === "subject" ? "subject" : "reference"}`}
+              title={`${type === "source" ? "Start" : "Connect"} ${role === "subject" ? "subject" : "reference"}`}
+              tabIndex={available ? 0 : -1}
+              role="button"
+              isConnectable={available}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.currentTarget.click();
+                }
+              }}
+            />
+          );
+        }),
+      )}
+      <div className="flex items-center gap-2 border-b border-neutral-100 px-3 py-1.5">
+        <div className="min-w-0 flex-1">{title}</div>
+        {menu}
+      </div>
+      <div className="space-y-2 p-2.5">{children}</div>
     </div>
   );
 }

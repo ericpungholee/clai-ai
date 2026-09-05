@@ -248,6 +248,23 @@ createServer(async (request, response) => {
     response.writeHead(204).end();
     return;
   }
+  if (request.method === "PUT" && path.endsWith("/subject")) {
+    const id = path.split("/nodes/")[1].split("/")[0];
+    graph.edges = graph.edges.filter(
+      (edge) => edge.target_node_id !== id || edge.role !== "subject",
+    );
+    const edge = {
+      id: `subject-${id}`,
+      source_node_id: body.source_node_id,
+      target_node_id: id,
+      role: "subject" as const,
+      pin: { mode: "version" as const, version_id: body.version_id },
+      order: null,
+    };
+    graph.edges.push(edge);
+    response.end(JSON.stringify(edge));
+    return;
+  }
   if (request.method === "DELETE" && path.endsWith("/subject")) {
     const id = path.split("/nodes/")[1].split("/")[0];
     graph.edges = graph.edges.filter(

@@ -1,13 +1,15 @@
 import type { NodeProps } from "@xyflow/react";
 import { memo } from "react";
-
-import type { WorkspaceNode } from "@/lib/graph";
-
+import { runBlockingReason, type WorkspaceNode } from "@/lib/graph";
 import { useDesignNodeActions } from "./design-node-actions";
 import { NodeFrame } from "./node-frame";
 import { PromptEditor } from "./prompt-editor";
 import { VersionStrip } from "./version-strip";
 import { RunProgress } from "./run-progress";
+import { SaveStatus, saveLabels } from "./save-status";
+import { IconButton } from "./icon";
+import { OverflowMenu } from "./overflow-menu";
+import { MaskOutline } from "./mask-outline";
 
 export const DesignNode = memo(function DesignNode({
   id,
@@ -18,276 +20,357 @@ export const DesignNode = memo(function DesignNode({
   const activeVersion = data.versions.find(
     (version) => version.id === data.activeVersionId,
   );
-  const staleMask =
-    data.mask !== null &&
-    data.mask.subject_version_id !== data.subject?.versionId;
+  const hasSubject = !!data.subject;
   const meshPreview =
     data.meshPreview?.versionId === activeVersion?.id ? data.meshPreview : null;
-  const brokenConnect = data.connects.some((ref) => ref.state !== "ready");
-  const fullMask =
-    data.mask !== null &&
-    data.mask.rle === `1 ${data.mask.width * data.mask.height}`;
-  const unsupportedMask =
-    data.mask !== null && !fullMask && data.connects.length > 0;
-  const canRun =
-    !data.remoteDeleted &&
-    !brokenConnect &&
-    !unsupportedMask &&
-    data.prompt.trim().length > 0 &&
-    data.run.status !== "running" &&
-    !staleMask;
+  const showMesh = !!meshPreview && data.previewMode !== "image";
+  const preview = showMesh
+    ? meshPreview.url
+    : (activeVersion?.artifact_url ?? data.subject?.artifactUrl);
+  const blocked = runBlockingReason(data);
+  const failed = data.run.status === "failed";
+  const warning = data.draftError
+    ? "Draft changed — choose which to keep."
+    : blocked && blocked !== "Enter a prompt." && blocked !== "Run in progress."
+      ? blocked
+      : failed
+        ? "Run failed — retry."
+        : null;
+  const preservation = activeVersion?.masked_outside_change;
+  const saveState = data.draftError ? "failed" : data.saveState;
+  const run = () => {
+    if (!blocked) actions.runNode(id);
+  };
 
   return (
     <NodeFrame
+      id={id}
+      data={data}
       selected={selected}
       title={
         <input
           aria-label="Node title"
-          className="nodrag w-full bg-transparent text-xs font-semibold text-neutral-700 outline-none focus:text-neutral-950"
+          title={data.title}
+          className="nodrag w-full truncate bg-transparent text-xs font-semibold text-neutral-700 outline-none focus:text-neutral-950"
           maxLength={120}
           onChange={(event) => actions.updateTitle(id, event.target.value)}
           onKeyDown={(event) => event.stopPropagation()}
           value={data.title}
         />
       }
-    >
-      {activeVersion ? (
-        <button
-          className="nodrag block w-full cursor-zoom-in"
-          aria-label="Inspect active image"
-          onClick={() =>
-            meshPreview
-              ? actions.viewMesh(activeVersion.id)
-              : actions.viewVersions([activeVersion.id])
-          }
-        >
-          <ArtifactImage
-            alt={`${data.title} active version`}
-            className="aspect-[4/3] w-full rounded-lg bg-neutral-100 object-cover"
-            src={meshPreview?.url ?? activeVersion.artifact_url}
-          />
-        </button>
-      ) : (
-        <div className="flex aspect-[4/3] items-center justify-center rounded-lg border border-dashed border-neutral-300 bg-neutral-50 px-5 text-center text-xs text-neutral-400">
-          Run this node to create an image
-        </div>
-      )}
-      {activeVersion ? (
-        <div className="mt-2 flex justify-between gap-2 text-xs">
-          <button
-            className="nodrag rounded bg-sky-50 px-2 py-1 font-medium text-sky-800"
-            onClick={() => actions.branchVersion(id, activeVersion.id)}
-          >
-            + Branch this image
-          </button>
-          <span className="self-center text-neutral-400">
-            {activeVersion.edit_depth} edit hops
-          </span>
-        </div>
-      ) : null}
-      {activeVersion ? (
-        <div
-          className="nodrag mt-2 flex items-center gap-1 text-[11px]"
-          role="group"
-          aria-label="Version view"
-        >
-          <button
-            aria-pressed={!meshPreview}
-            className="rounded border px-2 py-1"
-            onClick={() => actions.viewImage(id)}
-          >
-            2D image
-          </button>
-          <button
-            aria-pressed={!!meshPreview}
-            className="rounded border px-2 py-1"
-            onClick={() => actions.viewMesh(activeVersion.id)}
-          >
-            3D form
-          </button>
-        </div>
-      ) : null}
-      {activeVersion && activeVersion.edit_depth >= 5 ? (
-        <div className="mt-2 rounded bg-amber-50 p-2 text-xs text-amber-900">
-          Long edit chains can lose identity. Try the same instructions against
-          the root.
-          <button
-            className="nodrag mt-1 block underline"
-            onClick={() => actions.collapseVersion(activeVersion.id)}
-          >
-            Collapse chain and compare…
-          </button>
-        </div>
-      ) : activeVersion && activeVersion.edit_depth >= 2 ? (
-        <button
-          className="nodrag mt-2 text-[11px] text-neutral-500 underline"
-          onClick={() => actions.collapseVersion(activeVersion.id)}
-        >
-          Collapse chain…
-        </button>
-      ) : null}
-      {activeVersion?.masked_outside_change != null ? (
-        <p className="mt-2 text-[11px] text-neutral-500">
-          Outside the mask + 3px feather:{" "}
-          {activeVersion.masked_outside_change === 0
-            ? "pixels preserved exactly"
-            : `${(activeVersion.masked_outside_change * 100).toFixed(3)}% mean pixel change`}
-          . This measures preservation, not edit quality.
-        </p>
-      ) : null}
-
-      {data.subject ? (
-        <div className="mt-3 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 p-2">
-          <ArtifactImage
-            alt={`${data.subject.nodeTitle} pinned subject`}
-            className="h-10 w-10 shrink-0 rounded-md object-cover"
-            src={data.subject.artifactUrl}
-          />
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">
-              Subject
-            </p>
-            <p className="truncate text-xs text-neutral-700">
-              {data.subject.nodeTitle}
-            </p>
-            {data.subject.deleted ? (
-              <p className="text-[10px] text-sky-700">
-                Source deleted · pinned image retained
+      menu={
+        <>
+          <SaveStatus state={saveState} />
+          <OverflowMenu label="Node actions">
+            <button
+              aria-label="Duplicate draft"
+              onClick={() => actions.duplicateNode(id)}
+            >
+              Duplicate draft
+            </button>
+            {activeVersion && data.versions.length === 1 ? (
+              <>
+                <button
+                  aria-label="Hide version 1"
+                  onClick={() => actions.hideVersion(activeVersion.id, true)}
+                >
+                  Hide
+                </button>
+                {activeVersion.branch_node_ids.map((branchId) => {
+                  const branch = actions
+                    .candidates(id)
+                    .find((node) => node.id === branchId);
+                  return branch ? (
+                    <button
+                      key={branchId}
+                      aria-label={`Find ${branch.title}`}
+                      onClick={() => actions.jumpNode(branchId)}
+                    >
+                      Used by {branch.title}
+                    </button>
+                  ) : null;
+                })}
+              </>
+            ) : null}
+            {!hasSubject && activeVersion && activeVersion.edit_depth >= 2 ? (
+              <button
+                aria-label="Collapse chain"
+                onClick={() => actions.collapseVersion(activeVersion.id)}
+              >
+                Collapse chain
+              </button>
+            ) : null}
+            <button
+              aria-label="Delete node"
+              onClick={() => actions.deleteNode(id)}
+            >
+              Delete node
+            </button>
+            {data.subject?.deleted ? (
+              <button
+                aria-label="Disconnect subject"
+                onClick={() => actions.disconnectSubject(id)}
+              >
+                Disconnect subject
+              </button>
+            ) : null}
+            {data.draftError && !data.remoteDeleted ? (
+              <>
+                <button
+                  aria-label="Keep my draft"
+                  onClick={() => actions.resolveDraft(id, true)}
+                >
+                  Keep my draft
+                </button>
+                <button
+                  aria-label="Use saved draft"
+                  onClick={() => actions.resolveDraft(id, false)}
+                >
+                  Use saved draft
+                </button>
+              </>
+            ) : null}
+            {data.draftError ? (
+              <p className="max-w-64 break-words px-2 py-1 text-xs">
+                {data.draftError}
               </p>
+            ) : (
+              <p className="px-2 py-1 text-xs text-neutral-400">
+                {saveLabels[saveState]}
+              </p>
+            )}
+          </OverflowMenu>
+        </>
+      }
+    >
+      {preview ? (
+        <div className="image-preview group relative overflow-hidden rounded-md bg-neutral-100">
+          <button
+            className="nodrag block w-full cursor-zoom-in"
+            aria-label={
+              activeVersion ? "Inspect active image" : "Inspect subject image"
+            }
+            onClick={() =>
+              showMesh && activeVersion
+                ? actions.viewMesh(activeVersion.id)
+                : actions.viewVersions([
+                    activeVersion?.id ?? data.subject!.versionId,
+                  ])
+            }
+          >
+            <ArtifactImage
+              alt={`${data.title} preview`}
+              className="aspect-[4/3] w-full object-contain"
+              src={preview}
+            />
+          </button>
+          {data.mask &&
+          !showMesh &&
+          data.mask.subject_version_id === data.subject?.versionId ? (
+            <MaskOutline mask={data.mask} />
+          ) : null}
+          {meshPreview ? (
+            <div
+              role="group"
+              aria-label="Version view"
+              className="absolute right-2 top-2 flex rounded bg-white/95 shadow-sm"
+            >
+              <IconButton
+                icon="image"
+                label="2D image"
+                aria-pressed={!showMesh}
+                onClick={() => actions.viewImage(id)}
+              />
+              <IconButton
+                icon="mesh"
+                label="3D preview"
+                aria-pressed={showMesh}
+                onClick={() => actions.showMesh(id)}
+              />
+            </div>
+          ) : null}
+          {hasSubject && activeVersion && activeVersion.edit_depth >= 2 ? (
+            <button
+              aria-label="Collapse chain"
+              title={
+                activeVersion.edit_depth >= 5
+                  ? "Long edit chains can lose identity. Collapse and compare against the root."
+                  : "Collapse chain"
+              }
+              className="nodrag absolute left-2 top-2 rounded bg-white/95 px-1.5 py-0.5 text-[10px] text-neutral-600"
+              onClick={() => actions.collapseVersion(activeVersion.id)}
+            >
+              {activeVersion.edit_depth} edits
+            </button>
+          ) : null}
+          <div
+            className="preview-toolbar absolute inset-x-0 bottom-0 flex justify-end gap-1 bg-white/95 px-1.5 py-1"
+            role="toolbar"
+            aria-label="Image actions"
+          >
+            <IconButton
+              icon="inspect"
+              label="Inspect"
+              title={
+                preservation != null
+                  ? `Inspect. Outside the mask and 3px feather: ${preservation === 0 ? "pixels preserved exactly" : `${(preservation * 100).toFixed(3)}% mean pixel change`}. This measures preservation, not edit quality.`
+                  : "Inspect"
+              }
+              onClick={() =>
+                actions.viewVersions([
+                  activeVersion?.id ?? data.subject!.versionId,
+                ])
+              }
+            />
+            {activeVersion ? (
+              <IconButton
+                icon="branch"
+                label="Branch"
+                onClick={() => actions.branchVersion(id, activeVersion.id)}
+              />
+            ) : null}
+            {hasSubject ? (
+              <IconButton
+                icon="mask"
+                label={data.mask ? "Edit mask" : "Select area"}
+                onClick={() => actions.editMask(id)}
+              />
+            ) : null}
+            {activeVersion ? (
+              <IconButton
+                icon="mesh"
+                label="3D"
+                onClick={() => actions.viewMesh(activeVersion.id)}
+              />
             ) : null}
           </div>
-          <button
-            className="nodrag ml-auto text-[10px] text-sky-700"
-            onClick={() => actions.viewVersions([data.subject!.versionId])}
-          >
-            Inspect
-          </button>
         </div>
       ) : null}
-
       {data.subject ? (
         <button
-          className="nodrag mt-2 w-full rounded-md border border-orange-200 bg-orange-50 py-1.5 text-xs text-orange-900"
-          onClick={() => actions.editMask(id)}
+          className={`nodrag subject-chip flex w-full items-center gap-2 rounded px-1 py-0.5 text-left ${data.subject.deleted ? "opacity-50" : ""}`}
+          aria-label={`Inspect ${data.subject.nodeTitle}`}
+          title={
+            data.subject.deleted
+              ? "Source node deleted; pinned image retained"
+              : data.subject.nodeTitle
+          }
+          onClick={() => actions.viewVersions([data.subject!.versionId])}
+          onMouseEnter={() => actions.hoverWire(data.subject!.edgeId)}
+          onMouseLeave={() => actions.hoverWire(null)}
+          onFocus={() => actions.hoverWire(data.subject!.edgeId)}
+          onBlur={() => actions.hoverWire(null)}
+          data-highlighted={
+            data.highlightedWireId === data.subject.edgeId || undefined
+          }
         >
-          {data.mask ? "Edit mask" : "Select an area to edit"}
+          <span className="wire-number subject-number">1</span>
+          <ArtifactImage
+            alt=""
+            className="h-5 w-5 shrink-0 rounded object-cover"
+            src={data.subject.artifactUrl}
+          />
+          <span
+            className={`truncate text-xs text-neutral-600 ${data.subject.deleted ? "line-through" : ""}`}
+          >
+            {data.subject.nodeTitle}
+          </span>
         </button>
       ) : null}
-      {staleMask ? (
-        <p role="alert" className="mt-2 text-xs text-red-700">
-          This mask belongs to a different subject version. Reopen the mask
-          editor before running.
-        </p>
+      {warning ? (
+        <div
+          role="alert"
+          title={
+            data.draftError ??
+            (data.run.status === "failed" ? data.run.message : warning)
+          }
+          className="flex h-5 items-center gap-1 text-[10px] text-red-700"
+        >
+          <span className="truncate">{warning}</span>
+          {data.draftError && !data.remoteDeleted ? (
+            <OverflowMenu label="Resolve draft">
+              <button
+                aria-label="Keep my draft"
+                onClick={() => actions.resolveDraft(id, true)}
+              >
+                Keep my draft
+              </button>
+              <button
+                aria-label="Use saved draft"
+                onClick={() => actions.resolveDraft(id, false)}
+              >
+                Use saved draft
+              </button>
+              <p className="max-w-64 break-words px-2 text-xs">
+                {data.draftError}
+              </p>
+            </OverflowMenu>
+          ) : failed && !blocked ? (
+            <button
+              className="nodrag ml-auto underline"
+              aria-label="Retry"
+              title={blocked ?? "Retry"}
+              disabled={!!blocked}
+              onClick={run}
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
       ) : null}
-
       <PromptEditor
         document={data.document}
         connects={data.connects}
+        hasSubject={hasSubject}
+        highlightedWireId={data.highlightedWireId}
         candidates={actions.candidates(id)}
         onChange={(document) => actions.updateDocument(id, document)}
-        onHover={actions.hoverNode}
+        onHover={actions.hoverWire}
         onJump={actions.jumpNode}
-        onRun={() => actions.runNode(id)}
-        placeholder={
-          data.subject
-            ? "Describe one change — e.g. ‘square the base’, ‘brushed aluminium body’"
-            : "A compact desk lamp with a folded aluminium shade and a round walnut foot"
+        onRun={run}
+        placeholder={hasSubject ? "Describe a change…" : "Describe an object…"}
+        footer={
+          data.run.status === "running" ? (
+            <RunProgress run={data.run} />
+          ) : (
+            <>
+              {!hasSubject ? (
+                <IconButton
+                  icon="background"
+                  label="White bg"
+                  aria-pressed={data.settings.whiteBackground}
+                  onClick={() =>
+                    actions.updateWhiteBackground(
+                      id,
+                      !data.settings.whiteBackground,
+                    )
+                  }
+                />
+              ) : null}
+              <button
+                className="nodrag rounded bg-neutral-900 px-3 py-1 text-xs font-semibold text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-300"
+                disabled={!!blocked}
+                title={blocked ?? "Run"}
+                onClick={run}
+                type="button"
+              >
+                Run
+              </button>
+            </>
+          )
         }
       />
-      {brokenConnect ? (
-        <p role="alert" className="mt-2 text-xs text-red-700">
-          A connect source is deleted or has no image. Remove the chip or run
-          its source first.
-        </p>
-      ) : null}
-      {unsupportedMask ? (
-        <p role="alert" className="mt-2 text-xs text-amber-700">
-          Clear the mask or remove connect chips: FLUX Fill cannot consume
-          reference images.
-        </p>
-      ) : null}
-
-      {data.versions.length > 0 ? (
+      {data.versions.length >= 2 ||
+      data.versions.some((version) => version.hidden) ? (
         <VersionStrip
           nodeId={id}
           versions={data.versions}
           activeId={data.activeVersionId}
         />
       ) : null}
-
-      <div className="mt-3 flex items-center justify-between gap-2">
-        {!data.subject ? (
-          <label className="nodrag flex items-center gap-1.5 text-[11px] text-neutral-600">
-            <input
-              checked={data.settings.whiteBackground}
-              className="h-3.5 w-3.5 accent-sky-600"
-              onChange={(event) =>
-                actions.updateWhiteBackground(id, event.target.checked)
-              }
-              type="checkbox"
-            />
-            White background
-          </label>
-        ) : (
-          <span />
-        )}
-        <button
-          className="nodrag rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-300"
-          disabled={!canRun}
-          onClick={() => actions.runNode(id)}
-          type="button"
-        >
-          {data.run.status === "running"
-            ? "Running…"
-            : data.run.status === "failed"
-              ? "Retry run"
-              : "Run"}
-        </button>
-      </div>
-      {data.run.status === "running" ? <RunProgress run={data.run} /> : null}
-      {data.run.status === "failed" ? (
-        <div role="alert" className="mt-2 text-xs text-red-700">
-          The run did not finish. Your prompt and earlier images are safe.
-          <details className="nodrag mt-1 break-words">
-            <summary>Details</summary>
-            {data.run.message}
-          </details>
-        </div>
-      ) : null}
-      {data.draftError ? (
-        <div
-          role="alert"
-          className="mt-2 rounded bg-amber-50 p-2 text-xs text-amber-900"
-        >
-          <p className="break-words">{data.draftError}</p>
-          {!data.remoteDeleted ? (
-            <div className="nodrag mt-2 flex gap-2">
-              <button
-                className="underline"
-                onClick={() => actions.resolveDraft(id, true)}
-              >
-                Keep my draft
-              </button>
-              <button
-                className="underline"
-                onClick={() => actions.resolveDraft(id, false)}
-              >
-                Use saved draft
-              </button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-      <div className="nodrag mt-3 flex gap-3 border-t pt-2 text-[10px] text-neutral-400">
-        <button onClick={() => actions.duplicateNode(id)}>
-          Duplicate draft
-        </button>
-        <button onClick={() => actions.deleteNode(id)}>Delete node</button>
-      </div>
     </NodeFrame>
   );
 });
-
 function ArtifactImage({
   alt,
   className,
@@ -297,7 +380,7 @@ function ArtifactImage({
   className: string;
   src: string;
 }) {
-  // Artifact hosts are runtime-configured, so a static next/image allowlist is unsafe.
+  // Artifact hosts are runtime-configured.
   // eslint-disable-next-line @next/next/no-img-element
   return <img alt={alt} className={className} draggable={false} src={src} />;
 }
