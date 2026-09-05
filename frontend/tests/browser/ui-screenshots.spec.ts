@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("two wire roles at 100% and 40% in color and grayscale", async ({
   page,
   request,
-}) => {
+}, testInfo) => {
   const api = "http://127.0.0.1:8109";
   await request.post(`${api}/reset`);
   await request.put(`${api}/api/projects/fixture-project/nodes/target/prompt`, {
@@ -44,7 +44,9 @@ test("two wire roles at 100% and 40% in color and grayscale", async ({
         { zoom, grayscale },
       );
       await page.screenshot({
-        path: `../docs/ui-cleanup/${process.env.CLAI_SCREENSHOT_PHASE ?? "after"}-${zoom * 100}${grayscale ? "-grayscale" : ""}.png`,
+        path: testInfo.outputPath(
+          `wire-roles-${zoom * 100}${grayscale ? "-grayscale" : ""}.png`,
+        ),
       });
     }
   }

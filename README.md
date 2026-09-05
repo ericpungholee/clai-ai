@@ -1,24 +1,24 @@
 # Clai
 
-Clai is a node-based canvas for concepting physical products with AI. Wiring an immutable image version into another node as its subject changes the next run from generation to a subject-based edit.
+Clai is a canvas for designing physical products with AI. A draft produces one image and becomes a frozen result. Continue editing starts a new node from that image; the canvas is the edit history.
 
 ## Functionality
 
-- Unified design nodes with prompts, active artifacts, subject thumbnails, and version strips.
-- Subject wires pin a specific immutable version. A second subject wire replaces the first atomically.
-- Branch creation from any historical version.
-- Pure input resolution, operation routing, preservation-prompt construction, seed inheritance, and request freezing before enqueue.
-- Durable database-backed run jobs transported by Celery.
-- Nano Banana Pro generation/edit dispatch through fal, followed by first-party artifact ingestion.
-- Insert-only versions with provenance and internal per-operation DINOv2 change telemetry.
-- Subject-version-bound masks with brush, lasso, rectangle and SAM click/text selection.
-- FLUX Fill inpainting followed by a deterministic 3px composite seam; pixels outside that band are preserved from the original. Full-image selections become ordinary edits, and stale masks block runs.
-- Atomic connect chips/wires, following active source images in sentence order, with a two-connect cap and broken-source blocking.
-- Full-size image inspection, original download, side-by-side comparison, retained hidden versions, branch navigation and explicit editable chain collapse.
-- Version-specific Tripo 3D form view, default grey geometry ($0.20), optional standard textures ($0.30), first-party GLB/preview storage, and explicit occlusion warnings.
-- Durable run progress across reloads, draft conflict handling across tabs, node duplication, canvas shortcuts and project rename/delete with retained history.
+- Draft, running, result, and failed card states, enforced by API mutation guards.
+- Continue editing to the right; Try another and Revise prompt below. Failed runs remain editable and retryable.
+- Solid input-image wires and up to two dashed references, with numbered prompt chips.
+- Area selection with brush, lasso, rectangle, and SAM click/text selection. Saving outlines the input and focuses the prompt; Run generates the change.
+- FLUX Fill inpainting with a deterministic 3px composite seam. Pixels outside that band are preserved, and the result shows the preservation measurement.
+- Durable database-backed runs with frozen requests, Celery transport, and first-party artifact ingestion.
+- Nano Banana Pro generation and unmasked editing through fal.
+- Canvas comparison of any two image nodes, full-size inspection, original downloads, and explicit editable chain collapse.
+- Tripo 3D views with image colors and print, first-party GLB/preview storage, and textured replacement of older grey models. Hidden surfaces are inferred and fine details may vary.
+- Draft conflict recovery across tabs, retained images after source deletion, automatic titles, canvas shortcuts, and project rename/delete.
+- Read-only image selection for older multi-image nodes; new nodes make one image each.
 
-Limits: FLUX Fill cannot accept connect images, so mask + connect runs are explicitly blocked. Chain collapse supports plain instruction edits; it cannot safely replay masks or reference-image positions against a different root. Unmasked preservation is model-dependent, not a pixel guarantee. The Tripo contract check succeeded in about 72 seconds through upload and provider response, before download; queue time and textures may take longer. Auth and deployment are out of scope.
+References and area selections cannot be combined. Chain collapse supports plain instruction edits; it cannot replay selected regions or reference positions against another root. Unmasked preservation remains model-dependent. Auth and deployment are outside this implementation.
+
+See the [lifecycle and migration notes](docs/node-lifecycle/README.md) and [30-second workflow capture](docs/node-lifecycle/workflow.webm). The capture uses a deterministic test provider.
 
 ## Stack
 
@@ -29,7 +29,7 @@ Limits: FLUX Fill cannot accept connect images, so mask + connect runs are expli
 
 ## Architecture
 
-React Flow owns immediate pan, zoom, selection, and drag state. Scoped FastAPI mutations persist nodes and pinned subject edges without rewriting the graph. Run submission resolves and freezes the graph synchronously into `run_jobs`; workers dispatch only that frozen request and never re-resolve live wiring. Provider output is copied into Clai storage before a transaction appends the version and advances the node's active version.
+React Flow owns immediate pan, zoom, selection, and drag state. Scoped FastAPI mutations persist editable drafts and input wires. Run submission resolves and freezes inputs synchronously into `run_jobs`; workers dispatch that frozen request. Provider output is copied into Clai storage before a transaction records the node's image. Successful nodes reject changes to generation inputs and cannot run again.
 
 ```text
 React Flow → scoped FastAPI mutations → PostgreSQL
@@ -53,7 +53,7 @@ cp .env.example .env
 
 Set `FAL_KEY` to enable generation, SAM selection and 3D. Artifacts default to a shared local volume; both the API and worker must use the same storage. Provider outputs are copied there before committing a version or mesh cache.
 
-The frontend installs locked dependencies into its Docker volume before starting Next.js, so rebuilding with a new dependency cannot leave that volume stale.
+The frontend installs locked dependencies into its Docker volume before starting Next.js. Its build cache also uses a dedicated volume so Docker and local builds do not overwrite each other.
 
 ```bash
 make dev
