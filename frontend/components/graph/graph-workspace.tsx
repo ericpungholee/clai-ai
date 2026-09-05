@@ -28,16 +28,20 @@ import {
   replaceSubjectEdge,
   submitRun,
   savePrompt,
+  setVersionHidden,
   type PromptPart,
   toWorkspaceGraph,
   type GraphDocument,
   type WorkspaceEdge,
   type WorkspaceNode,
+  type Version,
 } from "@/lib/graph";
 
 import { AddNodeControl } from "./add-node-control";
 import { DesignNode } from "./design-node";
 import { MaskEditor } from "./mask-editor";
+import { ImageViewer } from "./image-viewer";
+import { CollapseDialog } from "./collapse-dialog";
 import { DesignNodeActionsContext } from "./design-node-actions";
 import { SaveStatus, type SaveState } from "./save-status";
 
@@ -99,6 +103,10 @@ export function GraphWorkspace({
   const [edges, setEdges] = useState(initialWorkspace.edges);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [maskNodeId, setMaskNodeId] = useState<string | null>(null);
+  const [viewedVersions, setViewedVersions] = useState<Version[]>([]);
+  const [collapseVersionId, setCollapseVersionId] = useState<string | null>(
+    null,
+  );
   const flowInstanceRef =
     useRef<ReactFlowInstance<WorkspaceNode, WorkspaceEdge>>(null);
   const canvasRef = useRef<HTMLElement>(null);
@@ -549,6 +557,7 @@ export function GraphWorkspace({
         updateNodeData(nodeId, { runState: "idle" });
         await refreshWorkspace();
         if (mountedRef.current) setSaveState("saved");
+        return job.version_id ?? undefined;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Run failed";
         if (mountedRef.current) {
@@ -569,6 +578,21 @@ export function GraphWorkspace({
       branchVersion,
       runNode,
       editMask: setMaskNodeId,
+      collapseVersion: setCollapseVersionId,
+      viewVersions: (ids: string[]) =>
+        setViewedVersions(
+          ids.flatMap((id) => {
+            const version = nodesRef.current
+              .flatMap((node) => node.data.versions)
+              .find((version) => version.id === id);
+            return version ? [version] : [];
+          }),
+        ),
+      hideVersion: (versionId: string, hidden: boolean) => {
+        void setVersionHidden(projectId, versionId, hidden)
+          .then(refreshWorkspace)
+          .catch(() => setSaveState("failed"));
+      },
       updateDocument,
       candidates: (id: string) =>
         nodesRef.current
@@ -602,12 +626,55 @@ export function GraphWorkspace({
       updateTitle,
       updateWhiteBackground,
       updateDocument,
+      projectId,
+      refreshWorkspace,
     ],
   );
 
   return (
     <DesignNodeActionsContext.Provider value={actions}>
       <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-white">
+        {viewedVersions.length > 0 ? (
+          <ImageViewer
+            versions={viewedVersions}
+            onClose={() => setViewedVersions([])}
+          />
+        ) : null}
+        {collapseVersionId ? (
+          <CollapseDialog
+            projectId={projectId}
+            versionId={collapseVersionId}
+            onClose={() => setCollapseVersionId(null)}
+            onRun={async (rootId, instruction) => {
+              const source = nodesRef.current.find((node) =>
+                node.data.versions.some(
+                  (version) => version.id === collapseVersionId,
+                ),
+              );
+              const before = source?.data.versions.find(
+                (version) => version.id === collapseVersionId,
+              );
+              if (!source || !before)
+                throw new Error("The source is no longer on this canvas.");
+              const branch = await createBranch(projectId, rootId, {
+                id: crypto.randomUUID(),
+                title: `${source.data.title.slice(0, 100)} · collapsed`,
+                prompt: instruction,
+                position: findAvailablePosition(
+                  { x: source.position.x + 500, y: source.position.y },
+                  nodesRef.current,
+                ),
+              });
+              await refreshWorkspace();
+              const resultId = await runNode(branch.node.id);
+              setCollapseVersionId(null);
+              const after = nodesRef.current
+                .find((node) => node.id === branch.node.id)
+                ?.data.versions.find((version) => version.id === resultId);
+              if (after) setViewedVersions([before, after]);
+            }}
+          />
+        ) : null}
         {(() => {
           const node = nodes.find((candidate) => candidate.id === maskNodeId);
           return node?.data.subject ? (

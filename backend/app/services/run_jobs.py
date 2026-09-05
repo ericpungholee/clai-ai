@@ -69,14 +69,20 @@ def submit_run(
     )
     source_ids = {edge.source_node_id for edge in edge_rows}
     node_rows = list(
-        db.scalars(
-            select(GraphNode)
+        db.execute(
+            select(GraphNode.id, GraphNode.active_version_id, GraphNode.deleted_at)
             .where(GraphNode.id.in_({node_id, *source_ids}))
             .with_for_update()
         )
     )
     nodes = {
-        str(node.id): _node_snapshot(node)
+        str(node.id): NodeSnapshot(
+            id=str(node.id),
+            prompt="",
+            active_version_id=str(node.active_version_id)
+            if node.active_version_id
+            else None,
+        )
         for node in node_rows
         if node.deleted_at is None
     }
@@ -92,7 +98,7 @@ def submit_run(
             "The prompt and connect wires do not match. Reconnect the broken chip."
         )
     target = replace(
-        nodes[str(node_id)],
+        _node_snapshot(target_row),
         prompt=compile_document(
             target_row.prompt,
             has_subject=any(edge.role == "subject" for edge in edge_rows),
@@ -110,7 +116,17 @@ def submit_run(
         if node.id in source_ids and node.active_version_id is not None
     )
     version_rows = (
-        list(db.scalars(select(Version).where(Version.id.in_(required_version_ids))))
+        list(
+            db.execute(
+                select(
+                    Version.id,
+                    Version.node_id,
+                    Version.artifact_url,
+                    Version.seed,
+                    Version.edit_depth,
+                ).where(Version.id.in_(required_version_ids))
+            )
+        )
         if required_version_ids
         else []
     )

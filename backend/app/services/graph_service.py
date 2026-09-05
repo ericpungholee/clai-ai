@@ -5,7 +5,13 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.domain.prompts import document_text, text_document
-from app.models.graph import GraphEdge, GraphNode, Version
+from app.models.graph import (
+    GraphEdge,
+    GraphNode,
+    Version,
+    VersionMetric,
+    VersionVisibility,
+)
 from app.schemas.graph import (
     ActivePinData,
     BranchCreate,
@@ -67,12 +73,46 @@ def read_graph_document(project_id: uuid.UUID, db: Session) -> GraphDocument:
             .order_by(GraphEdge.created_at, GraphEdge.id)
         )
     )
-    return GraphDocument(
+    document = GraphDocument(
         nodes=[
             serialize_node(node, versions_by_node.get(node.id, [])) for node in nodes
         ],
         edges=[serialize_edge(edge) for edge in edges],
     )
+    version_ids = [version.id for version in versions]
+    hidden = set(
+        db.scalars(
+            select(VersionVisibility.version_id).where(
+                VersionVisibility.version_id.in_(version_ids)
+            )
+        )
+    )
+    masked_metrics = {
+        metric.version_id: metric.change_magnitude
+        for metric in db.scalars(
+            select(VersionMetric).where(
+                VersionMetric.version_id.in_(version_ids),
+                VersionMetric.method == "outside_feather_pixel_diff",
+                VersionMetric.status == "complete",
+            )
+        )
+    }
+    alive = {node.id for node in nodes if node.deleted_at is None}
+    branches: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for edge in edges:
+        if (
+            edge.role == "subject"
+            and edge.pinned_version_id
+            and edge.target_node_id in alive
+        ):
+            branches.setdefault(edge.pinned_version_id, []).append(edge.target_node_id)
+    for node in document.nodes:
+        for version in node.versions:
+            version.hidden = version.id in hidden
+            version.branch_node_ids = branches.get(version.id, [])
+            if version.op in {"edit_inpaint", "edit_composite"}:
+                version.masked_outside_change = masked_metrics.get(version.id)
+    return document
 
 
 def create_node(project_id: uuid.UUID, data: NodeCreate, db: Session) -> GraphNode:
@@ -115,6 +155,10 @@ def update_node(node: GraphNode, data: NodeUpdate, db: Session) -> GraphNode:
     if "active_version_id" in fields:
         _validate_active_version(node, data.active_version_id, db)
         node.active_version_id = data.active_version_id
+        if data.active_version_id is not None:
+            visibility = db.get(VersionVisibility, data.active_version_id)
+            if visibility is not None:
+                db.delete(visibility)
     node.updated_at = datetime.now(UTC)
     node.revision += 1
     db.flush()
@@ -245,7 +289,14 @@ def create_branch(
     )
     if version is None:
         raise GraphMutationError("The selected branch version does not exist")
-    source = _lock_node(project_id, version.node_id, db)
+    # A retained version stays branchable even if its original canvas node was deleted.
+    source = db.scalar(
+        select(GraphNode)
+        .where(GraphNode.project_id == project_id, GraphNode.id == version.node_id)
+        .with_for_update()
+    )
+    if source is None:
+        raise GraphMutationError("The branch version does not belong to this project")
     node = create_node(
         project_id,
         NodeCreate(

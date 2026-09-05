@@ -33,6 +33,9 @@ function fixture(): GraphDocument {
     },
     prompt_at_runtime: "A lamp",
     edit_depth: 0,
+    hidden: false,
+    branch_node_ids: ["target"],
+    masked_outside_change: null,
   };
   return {
     nodes: [
@@ -108,6 +111,43 @@ createServer(async (request, response) => {
       id: "new-subject",
     });
     response.end("{}");
+    return;
+  }
+  if (path === "/many-versions") {
+    const source = graph.nodes[0];
+    const first = source.versions[0];
+    source.versions = Array.from({ length: 15 }, (_, index) => ({
+      ...first,
+      id: index === 0 ? first.id : `version-${index + 1}`,
+    }));
+    source.active_version_id = "version-15";
+    response.end("{}");
+    return;
+  }
+  if (path.endsWith("/visibility")) {
+    for (const node of graph.nodes)
+      for (const version of node.versions)
+        if (path.includes(`/versions/${version.id}/`)) {
+          version.hidden = body.hidden;
+          if (version.hidden && node.active_version_id === version.id)
+            node.active_version_id =
+              node.versions.findLast((item) => !item.hidden)?.id ?? null;
+        }
+    response.writeHead(204).end();
+    return;
+  }
+  if (request.method === "PATCH" && path.includes("/nodes/")) {
+    const node = graph.nodes.find((node) =>
+      path.endsWith(`/nodes/${node.id}`),
+    )!;
+    if (body.expected_revision !== node.revision) {
+      response
+        .writeHead(409)
+        .end(JSON.stringify({ detail: "Node changed in another tab" }));
+      return;
+    }
+    Object.assign(node, body, { revision: node.revision + 1 });
+    response.end(JSON.stringify(node));
     return;
   }
   if (path === "/artifacts/subject.svg") {
