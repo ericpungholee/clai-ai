@@ -33,6 +33,9 @@ export type Version = {
   };
   prompt_at_runtime: string;
   edit_depth: number;
+  hidden: boolean;
+  branch_node_ids: string[];
+  masked_outside_change: number | null;
 };
 
 export type PersistedGraphNode = {
@@ -267,6 +270,8 @@ export async function createBranch(
   input: {
     id: string;
     position: { x: number; y: number };
+    prompt?: string;
+    title?: string;
   },
 ): Promise<{ node: PersistedGraphNode; edge: PersistedGraphEdge }> {
   return apiRequest(
@@ -275,6 +280,40 @@ export async function createBranch(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
+    },
+  );
+}
+
+export type CollapsePreview =
+  | {
+      status: "ready";
+      root_version_id: string;
+      instruction: string;
+      steps: number;
+    }
+  | { status: "unavailable"; reason: string };
+
+export async function getCollapsePreview(
+  projectId: string,
+  versionId: string,
+): Promise<CollapsePreview> {
+  return apiRequest(
+    `${browserApiUrl}/api/projects/${projectId}/versions/${versionId}/collapse-preview`,
+    { cache: "no-store" },
+  );
+}
+
+export async function setVersionHidden(
+  projectId: string,
+  versionId: string,
+  hidden: boolean,
+): Promise<void> {
+  await apiRequest(
+    `${browserApiUrl}/api/projects/${projectId}/versions/${versionId}/visibility`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hidden }),
     },
   );
 }

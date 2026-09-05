@@ -335,7 +335,8 @@ def delete_node(
     dependents = db.scalar(
         select(GraphEdge.id).where(GraphEdge.source_node_id == node.id).limit(1)
     )
-    if dependents is not None or node.active_version_id is not None:
+    has_history = db.scalar(select(RunJob.id).where(RunJob.node_id == node.id).limit(1))
+    if dependents is not None or has_history is not None:
         node.deleted_at = datetime.now(UTC)
     else:
         db.delete(node)

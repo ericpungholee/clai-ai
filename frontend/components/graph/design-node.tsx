@@ -6,6 +6,7 @@ import type { WorkspaceNode } from "@/lib/graph";
 import { useDesignNodeActions } from "./design-node-actions";
 import { NodeFrame } from "./node-frame";
 import { PromptEditor } from "./prompt-editor";
+import { VersionStrip } from "./version-strip";
 
 export const DesignNode = memo(function DesignNode({
   id,
@@ -13,15 +14,16 @@ export const DesignNode = memo(function DesignNode({
   selected,
 }: NodeProps<WorkspaceNode>) {
   const actions = useDesignNodeActions();
-  const activeVersion =
-    data.versions.find((version) => version.id === data.activeVersionId) ??
-    data.versions.at(-1);
+  const activeVersion = data.versions.find(
+    (version) => version.id === data.activeVersionId,
+  );
   const staleMask =
     data.mask !== null &&
     data.mask.subject_version_id !== data.subject?.versionId;
   const brokenConnect = data.connects.some((ref) => ref.state !== "ready");
   const fullMask =
-    data.mask !== null && data.mask.rle === `1 ${data.mask.width * data.mask.height}`;
+    data.mask !== null &&
+    data.mask.rle === `1 ${data.mask.width * data.mask.height}`;
   const unsupportedMask =
     data.mask !== null && !fullMask && data.connects.length > 0;
   const canRun =
@@ -46,16 +48,63 @@ export const DesignNode = memo(function DesignNode({
       }
     >
       {activeVersion ? (
-        <ArtifactImage
-          alt={`${data.title} active version`}
-          className="aspect-[4/3] w-full rounded-lg bg-neutral-100 object-cover"
-          src={activeVersion.artifact_url}
-        />
+        <button
+          className="nodrag block w-full cursor-zoom-in"
+          aria-label="Inspect active image"
+          onClick={() => actions.viewVersions([activeVersion.id])}
+        >
+          <ArtifactImage
+            alt={`${data.title} active version`}
+            className="aspect-[4/3] w-full rounded-lg bg-neutral-100 object-cover"
+            src={activeVersion.artifact_url}
+          />
+        </button>
       ) : (
         <div className="flex aspect-[4/3] items-center justify-center rounded-lg border border-dashed border-neutral-300 bg-neutral-50 px-5 text-center text-xs text-neutral-400">
           Run this node to create an image
         </div>
       )}
+      {activeVersion ? (
+        <div className="mt-2 flex justify-between gap-2 text-xs">
+          <button
+            className="nodrag rounded bg-sky-50 px-2 py-1 font-medium text-sky-800"
+            onClick={() => actions.branchVersion(id, activeVersion.id)}
+          >
+            + Branch this image
+          </button>
+          <span className="self-center text-neutral-400">
+            {activeVersion.edit_depth} edit hops
+          </span>
+        </div>
+      ) : null}
+      {activeVersion && activeVersion.edit_depth >= 5 ? (
+        <div className="mt-2 rounded bg-amber-50 p-2 text-xs text-amber-900">
+          Long edit chains can lose identity. Try the same instructions against
+          the root.
+          <button
+            className="nodrag mt-1 block underline"
+            onClick={() => actions.collapseVersion(activeVersion.id)}
+          >
+            Collapse chain and compare…
+          </button>
+        </div>
+      ) : activeVersion && activeVersion.edit_depth >= 2 ? (
+        <button
+          className="nodrag mt-2 text-[11px] text-neutral-500 underline"
+          onClick={() => actions.collapseVersion(activeVersion.id)}
+        >
+          Collapse chain…
+        </button>
+      ) : null}
+      {activeVersion?.masked_outside_change != null ? (
+        <p className="mt-2 text-[11px] text-neutral-500">
+          Outside the mask + 3px feather:{" "}
+          {activeVersion.masked_outside_change === 0
+            ? "pixels preserved exactly"
+            : `${(activeVersion.masked_outside_change * 100).toFixed(3)}% mean pixel change`}
+          . This measures preservation, not edit quality.
+        </p>
+      ) : null}
 
       {data.subject ? (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 p-2">
@@ -118,43 +167,11 @@ export const DesignNode = memo(function DesignNode({
       ) : null}
 
       {data.versions.length > 0 ? (
-        <div className="mt-3">
-          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
-            Versions
-          </p>
-          <div className="nodrag nowheel flex gap-1.5 overflow-x-auto pb-1">
-            {data.versions.map((version, index) => (
-              <div className="group/version relative shrink-0" key={version.id}>
-                <button
-                  aria-label={`Select version ${index + 1}`}
-                  className={`block h-11 w-11 overflow-hidden rounded-md border-2 ${
-                    version.id === activeVersion?.id
-                      ? "border-sky-500"
-                      : "border-transparent"
-                  }`}
-                  onClick={() => actions.selectVersion(id, version.id)}
-                  title={`Version ${index + 1}`}
-                  type="button"
-                >
-                  <ArtifactImage
-                    alt=""
-                    className="h-full w-full object-cover"
-                    src={version.artifact_url}
-                  />
-                </button>
-                <button
-                  aria-label={`Branch from version ${index + 1}`}
-                  className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-neutral-900 text-[10px] leading-none text-white group-hover/version:flex focus:flex"
-                  onClick={() => actions.branchVersion(id, version.id)}
-                  title={`Branch from version ${index + 1}`}
-                  type="button"
-                >
-                  +
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
+        <VersionStrip
+          nodeId={id}
+          versions={data.versions}
+          activeId={data.activeVersionId}
+        />
       ) : null}
 
       <div className="mt-3 flex items-center justify-between gap-2">

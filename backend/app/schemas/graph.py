@@ -35,6 +35,9 @@ class VersionData(BaseModel):
     input_snapshot: dict[str, JsonValue]
     prompt_at_runtime: str
     edit_depth: int
+    hidden: bool = False
+    branch_node_ids: list[uuid.UUID] = Field(default_factory=list)
+    masked_outside_change: float | None = None
 
 
 class MaskData(BaseModel):

@@ -259,6 +259,19 @@ class VersionMetric(Base):
     )
 
 
+class VersionVisibility(Base):
+    __tablename__ = "version_visibility"
+
+    version_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("versions.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    hidden_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class VersionMesh(Base):
     __tablename__ = "version_meshes"
 
