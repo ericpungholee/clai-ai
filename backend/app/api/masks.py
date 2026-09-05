@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.graph import get_project_or_404
 from app.core.config import settings
 from app.core.database import get_db
 from app.domain.runs import MaskSnapshot
@@ -45,6 +46,7 @@ def put_mask(
     data: MaskData | None = None,
     db: Session = Depends(get_db),
 ) -> MaskData | None:
+    get_project_or_404(project_id, db)
     node = db.scalar(
         select(GraphNode)
         .where(

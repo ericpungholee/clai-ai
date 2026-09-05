@@ -22,6 +22,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.domain.prompts import PromptPart
 
 json_type = JSON().with_variant(JSONB, "postgresql")
 
@@ -63,7 +64,8 @@ class GraphNode(Base):
         index=True,
     )
     title: Mapped[str] = mapped_column(String(120), default="Untitled concept")
-    prompt: Mapped[str] = mapped_column(Text, default="")
+    prompt: Mapped[list[PromptPart]] = mapped_column(json_type, default=list)
+    revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     settings: Mapped[dict[str, object]] = mapped_column(
         json_type,
         default=lambda: {
@@ -148,6 +150,17 @@ class Version(Base):
 class GraphEdge(Base):
     __tablename__ = "graph_edges"
     __table_args__ = (
+        CheckConstraint(
+            "source_node_id <> target_node_id", name="ck_graph_edges_no_self"
+        ),
+        Index(
+            "uq_graph_edges_connect_source",
+            "target_node_id",
+            "source_node_id",
+            unique=True,
+            postgresql_where=text("role = 'connect'"),
+            sqlite_where=text("role = 'connect'"),
+        ),
         ForeignKeyConstraint(
             ["project_id", "source_node_id"],
             ["graph_nodes.project_id", "graph_nodes.id"],

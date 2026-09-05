@@ -55,6 +55,7 @@ def freeze_run_request(
 
     return FrozenRunRequest(
         node_id=target.id,
+        user_prompt=target.prompt,
         op=op,
         prompt_at_runtime=build_prompt(
             user_prompt=target.prompt,

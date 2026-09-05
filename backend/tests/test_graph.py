@@ -207,7 +207,7 @@ def test_legacy_node_without_white_background_remains_disabled(
                 id=node_id,
                 project_id=uuid.UUID(project_id),
                 title="Legacy",
-                prompt="A legacy lamp",
+                prompt=[{"type": "text", "text": "A legacy lamp"}],
                 settings={"aspect_ratio": "1:1", "width": 1024, "height": 1024},
                 position_x=0,
                 position_y=0,

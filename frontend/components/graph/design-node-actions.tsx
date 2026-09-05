@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
+import type { PromptPart } from "@/lib/graph";
 
 type DesignNodeActions = {
   updatePrompt: (nodeId: string, prompt: string) => void;
@@ -10,6 +11,10 @@ type DesignNodeActions = {
   branchVersion: (nodeId: string, versionId: string) => void;
   runNode: (nodeId: string) => void;
   editMask: (nodeId: string) => void;
+  updateDocument: (nodeId: string, document: PromptPart[]) => void;
+  candidates: (nodeId: string) => { id: string; title: string }[];
+  hoverNode: (nodeId: string | null) => void;
+  jumpNode: (nodeId: string) => void;
 };
 
 export const DesignNodeActionsContext = createContext<DesignNodeActions | null>(

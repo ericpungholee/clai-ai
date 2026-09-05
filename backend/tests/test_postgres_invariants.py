@@ -73,19 +73,29 @@ def insert_project(connection: object) -> uuid.UUID:
 
 def insert_node(connection: object, project_id: uuid.UUID) -> uuid.UUID:
     node_id = uuid.uuid4()
+    json_prompt = connection.scalar(
+        text(
+            "SELECT data_type = 'jsonb' FROM information_schema.columns "
+            "WHERE table_name = 'graph_nodes' AND column_name = 'prompt'"
+        )
+    )
+    prompt_value = "CAST(:prompt AS jsonb)" if json_prompt else ":prompt"
     connection.execute(
         text(
-            """
+            f"""
             INSERT INTO graph_nodes (
                 id, project_id, title, prompt, settings, position_x, position_y
             ) VALUES (
-                :id, :project_id, 'Node', 'shoe', CAST(:settings AS jsonb), 0, 0
+                :id, :project_id, 'Node', {prompt_value}, CAST(:settings AS jsonb), 0, 0
             )
             """
         ),
         {
             "id": node_id,
             "project_id": project_id,
+            "prompt": json.dumps([{"type": "text", "text": "shoe"}])
+            if json_prompt
+            else "shoe",
             "settings": json.dumps(
                 {"aspect_ratio": "1:1", "width": 1024, "height": 1024}
             ),

@@ -17,12 +17,14 @@ from app.schemas.graph import (
     GraphNodeData,
     NodeCreate,
     NodeUpdate,
+    PromptUpdate,
     RunJobData,
     RunPreviewData,
     RunSubmit,
     SubjectEdgeReplace,
 )
 from app.services.graph_service import (
+    GraphConflictError,
     GraphMutationError,
     create_branch,
     create_node,
@@ -31,6 +33,7 @@ from app.services.graph_service import (
     serialize_edge,
     serialize_node,
     update_node,
+    update_prompt,
 )
 from app.services.run_jobs import RunSubmissionError, preview_run, submit_run
 from app.services.run_queue import RunEnqueuer, get_run_enqueuer
@@ -39,7 +42,9 @@ router = APIRouter(prefix="/api/projects", tags=["graph"])
 
 
 def get_project_or_404(project_id: uuid.UUID, db: Session) -> Project:
-    project = db.get(Project, project_id)
+    project = db.scalar(
+        select(Project).where(Project.id == project_id).with_for_update()
+    )
     if project is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
@@ -105,6 +110,9 @@ def patch_node(
         )
         db.commit()
         return serialize_node(node, versions)
+    except GraphConflictError as error:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except GraphMutationError as error:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -156,6 +164,29 @@ def delete_subject_edge(
     )
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put("/{project_id}/nodes/{node_id}/prompt", response_model=GraphDocument)
+def put_prompt(
+    project_id: uuid.UUID,
+    node_id: uuid.UUID,
+    data: PromptUpdate,
+    db: Session = Depends(get_db),
+) -> GraphDocument:
+    get_project_or_404(project_id, db)
+    try:
+        update_prompt(project_id, node_id, data, db)
+        db.commit()
+        return read_graph_document(project_id, db)
+    except GraphConflictError as error:
+        db.rollback()
+        raise HTTPException(409, str(error)) from error
+    except GraphMutationError as error:
+        db.rollback()
+        raise HTTPException(422, str(error)) from error
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(422, "The connect wire is invalid") from error
 
 
 @router.post(

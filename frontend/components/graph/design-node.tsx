@@ -5,6 +5,7 @@ import type { WorkspaceNode } from "@/lib/graph";
 
 import { useDesignNodeActions } from "./design-node-actions";
 import { NodeFrame } from "./node-frame";
+import { PromptEditor } from "./prompt-editor";
 
 export const DesignNode = memo(function DesignNode({
   id,
@@ -18,8 +19,17 @@ export const DesignNode = memo(function DesignNode({
   const staleMask =
     data.mask !== null &&
     data.mask.subject_version_id !== data.subject?.versionId;
+  const brokenConnect = data.connects.some((ref) => ref.state !== "ready");
+  const fullMask =
+    data.mask !== null && data.mask.rle === `1 ${data.mask.width * data.mask.height}`;
+  const unsupportedMask =
+    data.mask !== null && !fullMask && data.connects.length > 0;
   const canRun =
-    data.prompt.trim().length > 0 && data.runState !== "running" && !staleMask;
+    !brokenConnect &&
+    !unsupportedMask &&
+    data.prompt.trim().length > 0 &&
+    data.runState !== "running" &&
+    !staleMask;
 
   return (
     <NodeFrame
@@ -80,19 +90,32 @@ export const DesignNode = memo(function DesignNode({
         </p>
       ) : null}
 
-      <textarea
-        aria-label="Design prompt"
-        className="nodrag nowheel mt-3 min-h-20 w-full resize-none rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-sm leading-5 text-foreground outline-none placeholder:text-neutral-400 focus:border-sky-400"
-        onChange={(event) => actions.updatePrompt(id, event.target.value)}
-        onKeyDown={(event) => event.stopPropagation()}
+      <PromptEditor
+        document={data.document}
+        connects={data.connects}
+        candidates={actions.candidates(id)}
+        onChange={(document) => actions.updateDocument(id, document)}
+        onHover={actions.hoverNode}
+        onJump={actions.jumpNode}
+        onRun={() => actions.runNode(id)}
         placeholder={
           data.subject
             ? "Describe one change — e.g. ‘square the base’, ‘brushed aluminium body’"
             : "A compact desk lamp with a folded aluminium shade and a round walnut foot"
         }
-        spellCheck
-        value={data.prompt}
       />
+      {brokenConnect ? (
+        <p role="alert" className="mt-2 text-xs text-red-700">
+          A connect source is deleted or has no image. Remove the chip or run
+          its source first.
+        </p>
+      ) : null}
+      {unsupportedMask ? (
+        <p role="alert" className="mt-2 text-xs text-amber-700">
+          Clear the mask or remove connect chips: FLUX Fill cannot consume
+          reference images.
+        </p>
+      ) : null}
 
       {data.versions.length > 0 ? (
         <div className="mt-3">

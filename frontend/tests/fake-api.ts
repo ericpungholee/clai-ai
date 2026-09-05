@@ -38,6 +38,9 @@ function fixture(): GraphDocument {
     nodes: [
       {
         id: "source",
+        document: [{ type: "text", text: "A lamp" }],
+        revision: 0,
+        deleted: false,
         title: "Desk lamp",
         prompt: "A lamp",
         settings,
@@ -49,6 +52,9 @@ function fixture(): GraphDocument {
       },
       {
         id: "target",
+        document: [{ type: "text", text: "Make the shade orange" }],
+        revision: 0,
+        deleted: false,
         title: "Change the shade",
         prompt: "Make the shade orange",
         settings,
@@ -113,6 +119,38 @@ createServer(async (request, response) => {
   }
   if (path.endsWith("/selection")) {
     response.end("null");
+    return;
+  }
+  if (path.endsWith("/prompt")) {
+    const target = graph.nodes.find((node) =>
+      path.includes(`/nodes/${node.id}/`),
+    )!;
+    if (body.expected_revision !== target.revision) {
+      response
+        .writeHead(409)
+        .end(JSON.stringify({ detail: "Prompt changed in another tab" }));
+      return;
+    }
+    target.document = body.document;
+    target.prompt = target.document
+      .map((part) => (part.type === "text" ? part.text : "@"))
+      .join("");
+    target.revision++;
+    graph.edges = graph.edges.filter(
+      (edge) => edge.target_node_id !== target.id || edge.role !== "connect",
+    );
+    let order = 0;
+    for (const part of target.document)
+      if (part.type === "connect")
+        graph.edges.push({
+          id: part.edge_id,
+          source_node_id: part.source_node_id,
+          target_node_id: target.id,
+          role: "connect",
+          pin: { mode: "active" },
+          order: order++,
+        });
+    response.end(JSON.stringify(graph));
     return;
   }
   if (path.endsWith("/mask")) {

@@ -45,6 +45,19 @@ export type PersistedGraphNode = {
   position: { x: number; y: number };
   versions: Version[];
   mask: MaskData | null;
+  document: PromptPart[];
+  revision: number;
+  deleted: boolean;
+};
+
+export type PromptPart =
+  | { type: "text"; text: string }
+  | { type: "connect"; edge_id: string; source_node_id: string };
+export type ConnectPreview = {
+  edgeId: string;
+  nodeId: string;
+  title: string;
+  state: "ready" | "empty" | "deleted";
 };
 
 export type MaskData = {
@@ -61,10 +74,10 @@ export type PersistedGraphEdge = {
   id: string;
   source_node_id: string;
   target_node_id: string;
-  role: "subject" | "connect";
-  pin: VersionPin | ActivePin;
-  order: number | null;
-};
+} & (
+  | { role: "subject"; pin: VersionPin; order: null }
+  | { role: "connect"; pin: ActivePin; order: number }
+);
 
 export type GraphDocument = {
   nodes: PersistedGraphNode[];
@@ -72,6 +85,8 @@ export type GraphDocument = {
 };
 
 export type SubjectPreview = {
+  nodeId: string;
+  deleted: boolean;
   nodeTitle: string;
   versionId: string;
   artifactUrl: string;
@@ -86,18 +101,21 @@ export type DesignNodeData = {
   versions: Version[];
   subject: SubjectPreview | null;
   mask: MaskData | null;
+  document: PromptPart[];
+  revision: number;
+  connects: ConnectPreview[];
   resolvedOp: Op;
   runState: "idle" | "running" | "failed";
   runError: string | null;
 } & Record<string, unknown>;
 
-export type SubjectEdgeData = {
-  role: "subject";
-  pin: VersionPin;
-} & Record<string, unknown>;
+export type WorkspaceEdgeData = (
+  { role: "subject"; pin: VersionPin } | { role: "connect"; pin: ActivePin }
+) &
+  Record<string, unknown>;
 
 export type WorkspaceNode = Node<DesignNodeData, "design">;
-export type WorkspaceEdge = Edge<SubjectEdgeData>;
+export type WorkspaceEdge = Edge<WorkspaceEdgeData>;
 
 export type RunJob = {
   id: string;
@@ -158,8 +176,24 @@ export async function selectMask(
 
 export async function getGraph(projectId: string): Promise<GraphDocument> {
   return apiRequest<GraphDocument>(
-    `${serverApiUrl}/api/projects/${projectId}/graph`,
+    `${typeof window === "undefined" ? serverApiUrl : browserApiUrl}/api/projects/${projectId}/graph`,
     { cache: "no-store" },
+  );
+}
+
+export async function savePrompt(
+  projectId: string,
+  nodeId: string,
+  document: PromptPart[],
+  revision: number,
+): Promise<GraphDocument> {
+  return apiRequest(
+    `${browserApiUrl}/api/projects/${projectId}/nodes/${nodeId}/prompt`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document, expected_revision: revision }),
+    },
   );
 }
 
@@ -285,65 +319,96 @@ export function toWorkspaceGraph(graph: GraphDocument): {
   );
 
   return {
-    nodes: graph.nodes.map((node) => {
-      const edge = subjectByTarget.get(node.id);
-      const source = edge ? nodesById.get(edge.source_node_id) : undefined;
-      const pinned =
-        edge && source
-          ? source.versions.find(
-              (version) => version.id === edge.pin.version_id,
-            )
-          : undefined;
-      const subject =
-        edge && source && pinned
-          ? {
-              nodeTitle: source.title,
-              versionId: pinned.id,
-              artifactUrl: pinned.artifact_url,
-            }
-          : null;
-      return {
-        id: node.id,
-        type: "design" as const,
-        position: node.position,
-        data: {
-          title: node.title,
-          prompt: node.prompt,
-          settings: node.settings,
-          seed: node.seed,
-          activeVersionId: node.active_version_id,
-          versions: node.versions,
-          subject,
-          mask: node.mask,
-          resolvedOp: resolveOp({
-            hasSubject: subject !== null,
-            hasMask: subject !== null && node.mask !== null,
-            connectCount: 0,
-          }),
-          runState: "idle" as const,
-          runError: null,
-        },
-      };
-    }),
+    nodes: graph.nodes
+      .filter((node) => !node.deleted)
+      .map((node) => {
+        const edge = subjectByTarget.get(node.id);
+        const source = edge ? nodesById.get(edge.source_node_id) : undefined;
+        const pinned =
+          edge && source
+            ? source.versions.find(
+                (version) => version.id === edge.pin.version_id,
+              )
+            : undefined;
+        const subject =
+          edge && source && pinned
+            ? {
+                nodeId: source.id,
+                deleted: source.deleted,
+                nodeTitle: source.title,
+                versionId: pinned.id,
+                artifactUrl: pinned.artifact_url,
+              }
+            : null;
+        return {
+          id: node.id,
+          type: "design" as const,
+          position: node.position,
+          data: {
+            title: node.title,
+            prompt: node.prompt,
+            settings: node.settings,
+            seed: node.seed,
+            activeVersionId: node.active_version_id,
+            versions: node.versions,
+            subject,
+            mask: node.mask,
+            document: node.document,
+            revision: node.revision,
+            connects: node.document.flatMap((part): ConnectPreview[] => {
+              if (part.type === "text") return [];
+              const source = nodesById.get(part.source_node_id);
+              return [
+                {
+                  edgeId: part.edge_id,
+                  nodeId: part.source_node_id,
+                  title: source?.title ?? "Deleted concept",
+                  state:
+                    !source || source.deleted
+                      ? "deleted"
+                      : source.active_version_id
+                        ? "ready"
+                        : "empty",
+                },
+              ];
+            }),
+            resolvedOp: resolveOp({
+              hasSubject: subject !== null,
+              hasMask: subject !== null && node.mask !== null,
+              connectCount: node.document.filter(
+                (part) => part.type === "connect",
+              ).length,
+            }),
+            runState: "idle" as const,
+            runError: null,
+          },
+        };
+      }),
     edges: graph.edges
       .filter(
-        (edge): edge is PersistedGraphEdge & { pin: VersionPin } =>
-          edge.role === "subject" && edge.pin.mode === "version",
+        (edge) =>
+          !nodesById.get(edge.source_node_id)?.deleted &&
+          !nodesById.get(edge.target_node_id)?.deleted,
       )
-      .map((edge) => toWorkspaceEdge(edge)),
+      .map(toWorkspaceEdge),
   };
 }
 
-export function toWorkspaceEdge(
-  edge: PersistedGraphEdge & { pin: VersionPin },
-): WorkspaceEdge {
+export function toWorkspaceEdge(edge: PersistedGraphEdge): WorkspaceEdge {
   return {
     id: edge.id,
     source: edge.source_node_id,
     target: edge.target_node_id,
     sourceHandle: "source",
-    targetHandle: "subject",
-    data: { role: "subject", pin: edge.pin },
+    targetHandle: edge.role,
+    style:
+      edge.role === "subject"
+        ? { stroke: "#0284c7", strokeWidth: 2 }
+        : { stroke: "#a855f7", strokeWidth: 2, strokeDasharray: "5 4" },
+    data:
+      edge.role === "subject"
+        ? { role: "subject", pin: edge.pin }
+        : { role: "connect", pin: edge.pin },
   };
 }
 

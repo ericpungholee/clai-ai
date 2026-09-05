@@ -27,6 +27,8 @@ import {
   patchDesignNode,
   replaceSubjectEdge,
   submitRun,
+  savePrompt,
+  type PromptPart,
   toWorkspaceGraph,
   type GraphDocument,
   type WorkspaceEdge,
@@ -104,6 +106,9 @@ export function GraphWorkspace({
   const edgesRef = useRef(edges);
   const patchTimersRef = useRef(new Map<string, number>());
   const mountedRef = useRef(true);
+  const pendingPatches = useRef(new Map<string, Record<string, unknown>>());
+  const pendingDocuments = useRef(new Map<string, PromptPart[]>());
+  const saves = useRef(new Map<string, Promise<void>>());
 
   useEffect(() => {
     mountedRef.current = true;
@@ -116,6 +121,32 @@ export function GraphWorkspace({
 
   const replaceWorkspace = useCallback((graph: GraphDocument) => {
     const workspace = toWorkspaceGraph(graph);
+    workspace.nodes = workspace.nodes.map((node) => {
+      const current = nodesRef.current.find((item) => item.id === node.id);
+      if (!current) return node;
+      const document = pendingDocuments.current.get(node.id);
+      const patch = pendingPatches.current.get(node.id);
+      return {
+        ...node,
+        selected: current.selected,
+        data: {
+          ...node.data,
+          ...(document
+            ? {
+                document,
+                prompt: current.data.prompt,
+                connects: current.data.connects,
+              }
+            : {}),
+          ...(patch?.title !== undefined ? { title: current.data.title } : {}),
+          ...(patch?.settings !== undefined
+            ? { settings: current.data.settings }
+            : {}),
+          runState: current.data.runState,
+          runError: current.data.runError,
+        },
+      };
+    });
     nodesRef.current = workspace.nodes;
     edgesRef.current = workspace.edges;
     setNodes(workspace.nodes);
@@ -129,25 +160,90 @@ export function GraphWorkspace({
 
   const persistNodePatch = useCallback(
     async (nodeId: string, patch: Record<string, unknown>) => {
-      setSaveState("saving");
-      try {
-        await patchDesignNode(projectId, nodeId, patch);
-        if (mountedRef.current) setSaveState("saved");
-      } catch {
-        if (mountedRef.current) setSaveState("failed");
-      }
+      pendingPatches.current.set(nodeId, {
+        ...pendingPatches.current.get(nodeId),
+        ...patch,
+      });
+      const previous = saves.current.get(nodeId) ?? Promise.resolve();
+      const save = previous
+        .catch(() => undefined)
+        .then(async () => {
+          setSaveState("saving");
+          const pending = pendingPatches.current.get(nodeId);
+          const document = pendingDocuments.current.get(nodeId);
+          if (!pending && !document) return;
+          try {
+            let revision = nodesRef.current.find((node) => node.id === nodeId)!
+              .data.revision;
+            if (pending && Object.keys(pending).length) {
+              const result = await patchDesignNode(projectId, nodeId, {
+                ...pending,
+                expected_revision: revision,
+              });
+              revision = result.revision;
+              if (pendingPatches.current.get(nodeId) === pending)
+                pendingPatches.current.delete(nodeId);
+            }
+            if (
+              pending &&
+              !Object.keys(pending).length &&
+              pendingPatches.current.get(nodeId) === pending
+            )
+              pendingPatches.current.delete(nodeId);
+            if (document) {
+              const graph = await savePrompt(
+                projectId,
+                nodeId,
+                document,
+                revision,
+              );
+              if (pendingDocuments.current.get(nodeId) === document)
+                pendingDocuments.current.delete(nodeId);
+              replaceWorkspace(graph);
+            } else {
+              const updated = nodesRef.current.map((node) =>
+                node.id === nodeId
+                  ? { ...node, data: { ...node.data, revision } }
+                  : node,
+              );
+              nodesRef.current = updated;
+              setNodes(updated);
+            }
+            if (mountedRef.current) setSaveState("saved");
+          } catch (error) {
+            if (mountedRef.current) {
+              setSaveState("failed");
+              const message =
+                error instanceof Error ? error.message : "Could not save";
+              const updated = nodesRef.current.map((node) =>
+                node.id === nodeId
+                  ? { ...node, data: { ...node.data, runError: message } }
+                  : node,
+              );
+              nodesRef.current = updated;
+              setNodes(updated);
+            }
+            throw error;
+          }
+        });
+      saves.current.set(nodeId, save);
+      return save;
     },
-    [projectId],
+    [projectId, replaceWorkspace],
   );
 
   const scheduleNodePatch = useCallback(
     (nodeId: string, patch: Record<string, unknown>) => {
+      pendingPatches.current.set(nodeId, {
+        ...pendingPatches.current.get(nodeId),
+        ...patch,
+      });
       const currentTimer = patchTimersRef.current.get(nodeId);
       if (currentTimer !== undefined) window.clearTimeout(currentTimer);
       setSaveState("saving");
       const timer = window.setTimeout(() => {
         patchTimersRef.current.delete(nodeId);
-        void persistNodePatch(nodeId, patch);
+        void persistNodePatch(nodeId, {}).catch(() => undefined);
       }, 500);
       patchTimersRef.current.set(nodeId, timer);
     },
@@ -156,45 +252,78 @@ export function GraphWorkspace({
 
   const updateNodeData = useCallback(
     (nodeId: string, patch: Partial<WorkspaceNode["data"]>) => {
-      setNodes((current) => {
-        const next = current.map((node) =>
-          node.id === nodeId
-            ? { ...node, data: { ...node.data, ...patch } }
-            : node,
-        );
-        nodesRef.current = next;
-        return next;
-      });
+      const next = nodesRef.current.map((node) =>
+        node.id === nodeId
+          ? { ...node, data: { ...node.data, ...patch } }
+          : node,
+      );
+      nodesRef.current = next;
+      setNodes(next);
     },
     [],
   );
 
-  const updatePrompt = useCallback(
-    (nodeId: string, prompt: string) => {
-      updateNodeData(nodeId, { prompt });
-      scheduleNodePatch(nodeId, { prompt });
+  const updateDocument = useCallback(
+    (nodeId: string, document: PromptPart[]) => {
+      const current = nodesRef.current.find((node) => node.id === nodeId);
+      if (!current) return;
+      const connects = document.flatMap((part) => {
+        if (part.type === "text") return [];
+        const source = nodesRef.current.find(
+          (node) => node.id === part.source_node_id,
+        );
+        return [
+          {
+            edgeId: part.edge_id,
+            nodeId: part.source_node_id,
+            title:
+              source?.data.title ??
+              current.data.connects.find((ref) => ref.edgeId === part.edge_id)
+                ?.title ??
+              "Deleted concept",
+            state: !source
+              ? ("deleted" as const)
+              : source.data.activeVersionId
+                ? ("ready" as const)
+                : ("empty" as const),
+          },
+        ];
+      });
+      pendingDocuments.current.set(nodeId, document);
+      updateNodeData(nodeId, {
+        document,
+        connects,
+        prompt: document
+          .map((part) => (part.type === "text" ? part.text : "@"))
+          .join(""),
+      });
+      scheduleNodePatch(nodeId, {});
     },
     [scheduleNodePatch, updateNodeData],
+  );
+
+  const updatePrompt = useCallback(
+    (nodeId: string, prompt: string) => {
+      updateDocument(nodeId, [{ type: "text", text: prompt }]);
+    },
+    [updateDocument],
   );
 
   const updateTitle = useCallback(
     (nodeId: string, title: string) => {
       setNodes((current) => {
-        const previous = current.find((node) => node.id === nodeId)?.data.title;
         const next = current.map((node) => {
           if (node.id === nodeId) {
             return { ...node, data: { ...node.data, title } };
           }
           const currentSubject = node.data.subject;
-          if (
-            currentSubject !== null &&
-            currentSubject.nodeTitle === previous
-          ) {
+          if (currentSubject !== null && currentSubject.nodeId === nodeId) {
             return {
               ...node,
               data: {
                 ...node.data,
                 subject: {
+                  ...currentSubject,
                   nodeTitle: title,
                   versionId: currentSubject.versionId,
                   artifactUrl: currentSubject.artifactUrl,
@@ -207,7 +336,7 @@ export function GraphWorkspace({
         nodesRef.current = next;
         return next;
       });
-      scheduleNodePatch(nodeId, { title });
+      if (title.trim()) scheduleNodePatch(nodeId, { title });
     },
     [scheduleNodePatch],
   );
@@ -244,12 +373,12 @@ export function GraphWorkspace({
         }
       }
       for (const nodeId of removedIds) {
-        void deleteDesignNode(projectId, nodeId).catch(() =>
-          setSaveState("failed"),
-        );
+        void deleteDesignNode(projectId, nodeId)
+          .then(refreshWorkspace)
+          .catch(() => setSaveState("failed"));
       }
     },
-    [persistNodePatch, projectId],
+    [persistNodePatch, projectId, refreshWorkspace],
   );
 
   const onEdgesChange = useCallback(
@@ -264,12 +393,30 @@ export function GraphWorkspace({
         return next;
       });
       for (const edge of removed) {
+        if (
+          !nodesRef.current.some((node) => node.id === edge.source) ||
+          !nodesRef.current.some((node) => node.id === edge.target)
+        )
+          continue;
+        if (edge.data?.role === "connect") {
+          const target = nodesRef.current.find(
+            (node) => node.id === edge.target,
+          );
+          if (target)
+            updateDocument(
+              edge.target,
+              target.data.document.filter(
+                (part) => part.type !== "connect" || part.edge_id !== edge.id,
+              ),
+            );
+          continue;
+        }
         void deleteSubjectEdge(projectId, edge.target).catch(() =>
           setSaveState("failed"),
         );
       }
     },
-    [projectId],
+    [projectId, updateDocument],
   );
 
   const onConnect = useCallback(
@@ -278,6 +425,30 @@ export function GraphWorkspace({
       const source = nodesRef.current.find(
         (node) => node.id === connection.source,
       );
+      if (connection.targetHandle === "connect") {
+        const target = nodesRef.current.find(
+          (node) => node.id === connection.target,
+        );
+        if (
+          !target ||
+          !source ||
+          source.id === target.id ||
+          target.data.connects.length >= 2 ||
+          target.data.connects.some((ref) => ref.nodeId === source.id)
+        )
+          return;
+        updateDocument(target.id, [
+          ...target.data.document,
+          { type: "text", text: " " },
+          {
+            type: "connect",
+            edge_id: crypto.randomUUID(),
+            source_node_id: source.id,
+          },
+        ]);
+        await persistNodePatch(target.id, {}).catch(() => undefined);
+        return;
+      }
       if (
         !source?.data.activeVersionId ||
         connection.source === connection.target
@@ -297,7 +468,7 @@ export function GraphWorkspace({
         if (mountedRef.current) setSaveState("failed");
       }
     },
-    [projectId, refreshWorkspace],
+    [projectId, refreshWorkspace, updateDocument, persistNodePatch],
   );
 
   const addNode = useCallback(async () => {
@@ -358,6 +529,7 @@ export function GraphWorkspace({
         (candidate) => candidate.id === nodeId,
       );
       if (!node || !node.data.prompt.trim()) return;
+      if (node.data.runState === "running") return;
       const timer = patchTimersRef.current.get(nodeId);
       if (timer !== undefined) {
         window.clearTimeout(timer);
@@ -365,11 +537,7 @@ export function GraphWorkspace({
       }
       updateNodeData(nodeId, { runState: "running", runError: null });
       try {
-        await patchDesignNode(projectId, nodeId, {
-          prompt: node.data.prompt,
-          title: node.data.title,
-          settings: node.data.settings,
-        });
+        await persistNodePatch(nodeId, {});
         let job = await submitRun(projectId, nodeId, crypto.randomUUID());
         while (job.status !== "complete" && job.status !== "failed") {
           await new Promise((resolve) => window.setTimeout(resolve, 750));
@@ -378,6 +546,7 @@ export function GraphWorkspace({
         if (job.status === "failed") {
           throw new Error(job.error ?? "Run failed");
         }
+        updateNodeData(nodeId, { runState: "idle" });
         await refreshWorkspace();
         if (mountedRef.current) setSaveState("saved");
       } catch (error) {
@@ -388,7 +557,7 @@ export function GraphWorkspace({
         }
       }
     },
-    [projectId, refreshWorkspace, updateNodeData],
+    [projectId, refreshWorkspace, updateNodeData, persistNodePatch],
   );
 
   const actions = useMemo(
@@ -400,6 +569,30 @@ export function GraphWorkspace({
       branchVersion,
       runNode,
       editMask: setMaskNodeId,
+      updateDocument,
+      candidates: (id: string) =>
+        nodesRef.current
+          .filter((node) => node.id !== id)
+          .map((node) => ({ id: node.id, title: node.data.title })),
+      hoverNode: (id: string | null) =>
+        setNodes((current) =>
+          current.map((node) => ({
+            ...node,
+            style: {
+              ...node.style,
+              outline: node.id === id ? "3px solid #a855f7" : undefined,
+            },
+          })),
+        ),
+      jumpNode: (id: string) => {
+        const node = nodesRef.current.find((node) => node.id === id);
+        if (node)
+          void flowInstanceRef.current?.setCenter(
+            node.position.x + 152,
+            node.position.y + 180,
+            { zoom: 1, duration: 350 },
+          );
+      },
     }),
     [
       branchVersion,
@@ -408,6 +601,7 @@ export function GraphWorkspace({
       updatePrompt,
       updateTitle,
       updateWhiteBackground,
+      updateDocument,
     ],
   );
 
@@ -462,6 +656,15 @@ export function GraphWorkspace({
               flowInstanceRef.current = instance;
             }}
             onNodesChange={onNodesChange}
+            onBeforeDelete={async ({ nodes: removing }) =>
+              removing.length === 0 ||
+              !edgesRef.current.some((edge) =>
+                removing.some((node) => node.id === edge.source),
+              ) ||
+              window.confirm(
+                "Delete these concepts? Connected prompts will keep broken chips until you replace or remove them.",
+              )
+            }
           >
             <Background
               color="#d4d4d8"
