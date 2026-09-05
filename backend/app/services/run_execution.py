@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.runs import FrozenRunRequest
 from app.models.graph import GraphNode, RunJob, Version, VersionMetric
+from app.models.project import Project
 from app.providers.base import ImageProvider
 from app.services.frozen_request_codec import decode_frozen_request
 from app.storage.artifacts import ArtifactIngestor, StoredArtifact
@@ -157,6 +158,10 @@ def _commit_version(
     if not isinstance(provider_job, ProviderJob):
         raise RunExecutionError("Provider returned an invalid job")
     with session_factory.begin() as db:
+        project_id = db.scalar(select(RunJob.project_id).where(RunJob.id == job_id))
+        project = db.scalar(
+            select(Project).where(Project.id == project_id).with_for_update()
+        )
         job = _lock_job(db, job_id)
         existing = db.scalar(select(Version).where(Version.run_job_id == job.id))
         if existing is not None:
@@ -195,7 +200,14 @@ def _commit_version(
         )
         db.add(version)
         db.flush()
+        if node.title == "Untitled concept":
+            # Titles are a visible shorthand, never additional generation context.
+            text = request.user_prompt.strip()
+            node.title = " ".join(text.split()[:8])[:120] or "Untitled concept"
         node.active_version_id = version.id
+        if project is not None:
+            project.thumbnail_url = artifact.artifact_url
+            project.updated_at = datetime.now(UTC)
         if request.subject is not None:
             db.add(
                 VersionMetric(

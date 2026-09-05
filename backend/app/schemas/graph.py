@@ -44,6 +44,27 @@ class MaskData(BaseModel):
     subject_version_id: uuid.UUID
 
 
+class PromptTextData(BaseModel):
+    type: Literal["text"]
+    text: str = Field(max_length=8000)
+
+
+class PromptConnectData(BaseModel):
+    type: Literal["connect"]
+    edge_id: uuid.UUID
+    source_node_id: uuid.UUID
+
+
+PromptPartData = Annotated[
+    PromptTextData | PromptConnectData, Field(discriminator="type")
+]
+
+
+class PromptUpdate(BaseModel):
+    document: list[PromptPartData] = Field(max_length=128)
+    expected_revision: int = Field(ge=0)
+
+
 class GraphNodeData(BaseModel):
     id: uuid.UUID
     title: str
@@ -54,6 +75,9 @@ class GraphNodeData(BaseModel):
     position: GraphPosition
     versions: list[VersionData]
     mask: MaskData | None = None
+    document: list[PromptPartData]
+    revision: int
+    deleted: bool = False
 
 
 class VersionPinData(BaseModel):
@@ -68,13 +92,27 @@ class ActivePinData(BaseModel):
 PinData = Annotated[VersionPinData | ActivePinData, Field(discriminator="mode")]
 
 
-class GraphEdgeData(BaseModel):
+class SubjectEdgeData(BaseModel):
     id: uuid.UUID
     source_node_id: uuid.UUID
     target_node_id: uuid.UUID
-    role: Literal["subject", "connect"]
-    pin: PinData
-    order: int | None = None
+    role: Literal["subject"] = "subject"
+    pin: VersionPinData
+    order: None = None
+
+
+class ConnectEdgeData(BaseModel):
+    id: uuid.UUID
+    source_node_id: uuid.UUID
+    target_node_id: uuid.UUID
+    role: Literal["connect"] = "connect"
+    pin: ActivePinData
+    order: int
+
+
+GraphEdgeData = Annotated[
+    SubjectEdgeData | ConnectEdgeData, Field(discriminator="role")
+]
 
 
 class GraphDocument(BaseModel):
@@ -92,6 +130,7 @@ class NodeCreate(BaseModel):
 
 
 class NodeUpdate(BaseModel):
+    expected_revision: int | None = Field(default=None, ge=0)
     title: Title | None = None
     prompt: str | None = Field(default=None, max_length=8000)
     settings: NodeSettingsData | None = None

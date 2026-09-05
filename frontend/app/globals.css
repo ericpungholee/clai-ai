@@ -1,4 +1,6 @@
 @import "tailwindcss";
+
+.prompt-editor:empty::before { content: attr(data-placeholder); color: #a3a3a3; pointer-events: none; }
 @import "@xyflow/react/dist/style.css";
 
 :root {

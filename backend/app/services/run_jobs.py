@@ -1,11 +1,13 @@
 import secrets
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.domain.prompts import compile_document
 from app.domain.runs import (
     ActivePin,
     ConnectEdge,
@@ -17,6 +19,7 @@ from app.domain.runs import (
     VersionSnapshot,
 )
 from app.models.graph import GraphEdge, GraphNode, RunJob, Version
+from app.models.project import Project
 from app.services.frozen_request_codec import encode_frozen_request
 from app.services.run_freezing import freeze_run_request
 
@@ -33,6 +36,9 @@ def submit_run(
     db: Session,
     random_seed: Callable[[], int] | None = None,
 ) -> tuple[RunJob, bool]:
+    # A project-sized mutation lock gives all graph reads one coherent snapshot
+    # and avoids opposing node-lock orders when two nodes reference each other.
+    db.scalar(select(Project).where(Project.id == project_id).with_for_update())
     target_row = db.scalar(
         select(GraphNode)
         .where(
@@ -69,8 +75,29 @@ def submit_run(
             .with_for_update()
         )
     )
-    nodes = {str(node.id): _node_snapshot(node) for node in node_rows}
-    target = nodes[str(node_id)]
+    nodes = {
+        str(node.id): _node_snapshot(node)
+        for node in node_rows
+        if node.deleted_at is None
+    }
+    chips = [part for part in target_row.prompt if part["type"] == "connect"]
+    connects = sorted(
+        (edge for edge in edge_rows if edge.role == "connect"),
+        key=lambda edge: edge.connect_order,
+    )
+    if [(part["edge_id"], part["source_node_id"]) for part in chips] != [
+        (str(edge.id), str(edge.source_node_id)) for edge in connects
+    ]:
+        raise RunSubmissionError(
+            "The prompt and connect wires do not match. Reconnect the broken chip."
+        )
+    target = replace(
+        nodes[str(node_id)],
+        prompt=compile_document(
+            target_row.prompt,
+            has_subject=any(edge.role == "subject" for edge in edge_rows),
+        ),
+    )
 
     required_version_ids = {
         edge.pinned_version_id
@@ -104,6 +131,11 @@ def submit_run(
         versions=versions,
         random_seed=random_seed or (lambda: secrets.randbits(32)),
     )
+    if frozen.mask is not None and frozen.connects:
+        raise RunSubmissionError(
+            "FLUX Fill cannot use connect images. Remove the connect chips "
+            "or clear the mask before running."
+        )
     job = RunJob(
         id=uuid.uuid4(),
         project_id=project_id,
@@ -152,7 +184,7 @@ def _node_snapshot(node: GraphNode) -> NodeSnapshot:
         )
     return NodeSnapshot(
         id=str(node.id),
-        prompt=node.prompt,
+        prompt="",
         settings=NodeSettings(
             aspect_ratio=_setting_string(settings, "aspect_ratio"),
             width=_setting_integer(settings, "width"),

@@ -132,3 +132,4 @@ class FrozenRunRequest:
     mask: MaskSnapshot | None
     input_snapshot: InputSnapshot
     edit_depth: int
+    user_prompt: str = ""
