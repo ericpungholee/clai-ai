@@ -129,7 +129,7 @@ def put_subject_edge(
     data: SubjectEdgeReplace,
     db: Session = Depends(get_db),
 ) -> GraphEdgeData:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
     try:
         edge = replace_subject_edge(
             project_id=project_id,
@@ -137,6 +137,7 @@ def put_subject_edge(
             data=data,
             db=db,
         )
+        project.updated_at = datetime.now(UTC)
         db.commit()
         return serialize_edge(edge)
     except GraphMutationError as error:
@@ -156,7 +157,7 @@ def delete_subject_edge(
     target_node_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> Response:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
     db.execute(
         delete(GraphEdge).where(
             GraphEdge.project_id == project_id,
@@ -164,6 +165,7 @@ def delete_subject_edge(
             GraphEdge.role == "subject",
         )
     )
+    project.updated_at = datetime.now(UTC)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -203,7 +205,7 @@ def post_branch(
     data: BranchCreate,
     db: Session = Depends(get_db),
 ) -> BranchData:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
     try:
         branch = create_branch(
             project_id=project_id,
@@ -211,6 +213,7 @@ def post_branch(
             data=data,
             db=db,
         )
+        project.updated_at = datetime.now(UTC)
         db.commit()
         return branch
     except GraphMutationError as error:
@@ -260,7 +263,11 @@ def post_run(
             try:
                 enqueuer.enqueue(job_id)
             except Exception as error:
-                failed_job = db.get(RunJob, job_id)
+                failed_job = db.scalar(
+                    select(RunJob).where(RunJob.id == job_id).with_for_update()
+                )
+                if failed_job is not None and failed_job.status != "queued":
+                    return serialize_run_job(job_id, db)
                 if failed_job is not None:
                     failed_job.status = "failed"
                     failed_job.error = f"QueueError: {error}"[:8000]
@@ -327,7 +334,7 @@ def delete_node(
     node_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> Response:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
     node = db.scalar(
         select(GraphNode)
         .where(GraphNode.id == node_id, GraphNode.project_id == project_id)
@@ -343,6 +350,7 @@ def delete_node(
         node.deleted_at = datetime.now(UTC)
     else:
         db.delete(node)
+    project.updated_at = datetime.now(UTC)
     try:
         db.commit()
     except SQLAlchemyError as error:

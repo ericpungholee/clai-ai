@@ -4,10 +4,12 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models.graph import RunJob
+from app.services.run_execution import PendingDinoV2Scorer, execute_run_job
 from app.services.run_queue import get_run_enqueuer
 from tests.conftest import TestingSessionLocal
 from tests.test_graph import (
     CapturingEnqueuer,
+    FakeIngestor,
     FakeProvider,
     create_node,
     create_project,
@@ -63,6 +65,13 @@ def test_atomic_chips_order_active_following_broken_refs_and_conflicts(
             "Put the logo from image 1 on image 2"
         )
         assert "A lamp" not in frozen["prompt_at_runtime"]
+    execute_run_job(
+        job_id=uuid.UUID(submitted.json()["id"]),
+        session_factory=TestingSessionLocal,
+        provider=provider,
+        ingestor=FakeIngestor(),
+        scorer=PendingDinoV2Scorer(),
+    )
     _, new_av = submit_and_execute(client, project, str(a["id"]), queue, provider)
     assert (
         client.put(
@@ -83,6 +92,13 @@ def test_atomic_chips_order_active_following_broken_refs_and_conflicts(
         assert frozen["input_snapshot"]["subject_version_id"] == str(av)
         assert frozen["input_snapshot"]["connect_version_ids"] == [str(new_av), str(bv)]
         assert "image 2 with image 3" in frozen["prompt_at_runtime"]
+    execute_run_job(
+        job_id=uuid.UUID(submitted.json()["id"]),
+        session_factory=TestingSessionLocal,
+        provider=provider,
+        ingestor=FakeIngestor(),
+        scorer=PendingDinoV2Scorer(),
+    )
     assert client.delete(f"/api/projects/{project}/nodes/{b['id']}").status_code == 204
     graph = client.get(f"/api/projects/{project}/graph").json()
     assert next(node for node in graph["nodes"] if node["id"] == b["id"])["deleted"]

@@ -460,7 +460,7 @@ export function runDisplay(job: RunJob | null): NodeRunState {
   return { status: "running", job, startedAt: job.created_at };
 }
 
-export function toWorkspaceEdge(edge: PersistedGraphEdge): WorkspaceEdge {
+function toWorkspaceEdge(edge: PersistedGraphEdge): WorkspaceEdge {
   return {
     id: edge.id,
     source: edge.source_node_id,

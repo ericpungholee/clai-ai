@@ -3,7 +3,7 @@ import struct
 from dataclasses import dataclass
 
 from app.providers.base import ArtifactReader
-from app.storage.artifacts import ArtifactStore, StoredArtifact
+from app.storage.artifacts import ArtifactStore, StoredArtifact, image_content_type
 
 
 def validate_glb(content: bytes) -> None:
@@ -33,8 +33,12 @@ def ingest_mesh(
     reader: ArtifactReader,
     store: ArtifactStore,
     attempt_id: str,
+    textured: bool = False,
 ) -> StoredMesh:
-    mesh = response.get("model_mesh")
+    # Untextured Tripo responses leave model_mesh null and populate base_model.
+    mesh = response.get("model_mesh") or response.get(
+        "pbr_model" if textured else "base_model"
+    )
     if not isinstance(mesh, dict) or not isinstance(mesh.get("url"), str):
         raise ValueError("The provider returned no mesh")
     content = reader.read(mesh["url"]).content
@@ -52,14 +56,14 @@ def ingest_mesh(
         and rendered["url"]
     ):
         image = reader.read(rendered["url"])
-        if image.content_type not in {"image/png", "image/jpeg", "image/webp"}:
-            raise ValueError("The provider preview is not a supported image")
+        # fal can label valid WebP previews as application/octet-stream.
+        content_type = image_content_type(image.content)
         suffix = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[
-            image.content_type
+            content_type
         ]
         preview = store.put(
             key=f"meshes/{attempt_id}/preview.{suffix}",
             content=image.content,
-            content_type=image.content_type,
+            content_type=content_type,
         )
     return StoredMesh(model=artifact, preview=preview)

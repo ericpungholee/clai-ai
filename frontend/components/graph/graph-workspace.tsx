@@ -15,7 +15,14 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 
 import {
   createBranch,
@@ -322,7 +329,12 @@ export function GraphWorkspace({
               nodesRef.current = updated;
               setNodes(updated);
             }
-            if (mountedRef.current) setSaveState("saved");
+            if (mountedRef.current)
+              setSaveState(
+                pendingDocuments.current.size || pendingPatches.current.size
+                  ? "saving"
+                  : "saved",
+              );
           } catch (error) {
             if (mountedRef.current) {
               setSaveState("failed");
@@ -563,7 +575,9 @@ export function GraphWorkspace({
       });
       for (const change of settledPositions) {
         if (change.type === "position" && change.position) {
-          void persistNodePatch(change.id, { position: change.position });
+          void persistNodePatch(change.id, { position: change.position }).catch(
+            () => undefined,
+          );
         }
       }
       for (const node of removedNodes) {
@@ -585,6 +599,7 @@ export function GraphWorkspace({
             void refreshWorkspace().catch(() => setSaveState("failed"));
           })
           .catch(() => {
+            deletingNodes.current.delete(node.id);
             const restored = [...nodesRef.current, node];
             nodesRef.current = restored;
             setNodes(restored);
@@ -869,46 +884,42 @@ export function GraphWorkspace({
     ],
   );
 
-  useEffect(() => {
-    const keydown = (event: KeyboardEvent) => {
-      if (
-        (event.target instanceof HTMLElement &&
-          event.target.closest(
-            'input,textarea,select,[contenteditable="true"]',
-          )) ||
-        document.querySelector("dialog[open]")
-      )
-        return;
-      const selected = nodesRef.current.find((node) => node.selected);
-      if (event.key.toLowerCase() === "n" && !event.metaKey && !event.ctrlKey) {
-        event.preventDefault();
-        void addNode();
-      }
-      if (event.key.toLowerCase() === "f" && !event.metaKey && !event.ctrlKey) {
-        event.preventDefault();
-        void flowInstanceRef.current?.fitView(fitViewOptions);
-      }
-      if (
-        event.key.toLowerCase() === "d" &&
-        (event.metaKey || event.ctrlKey) &&
-        selected
-      ) {
-        event.preventDefault();
-        void duplicateNode(selected.id);
-      }
-      if (
-        event.key.toLowerCase() === "b" &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        selected?.data.activeVersionId
-      ) {
-        event.preventDefault();
-        void branchVersion(selected.id, selected.data.activeVersionId);
-      }
-    };
-    window.addEventListener("keydown", keydown, true);
-    return () => window.removeEventListener("keydown", keydown, true);
-  }, [addNode, branchVersion, duplicateNode]);
+  const keydown = (event: KeyboardEvent<HTMLElement>) => {
+    if (
+      (event.target instanceof HTMLElement &&
+        event.target.closest(
+          'input,textarea,select,[contenteditable="true"]',
+        )) ||
+      document.querySelector("dialog[open]")
+    )
+      return;
+    const selected = nodesRef.current.find((node) => node.selected);
+    if (event.key.toLowerCase() === "n" && !event.metaKey && !event.ctrlKey) {
+      event.preventDefault();
+      void addNode();
+    }
+    if (event.key.toLowerCase() === "f" && !event.metaKey && !event.ctrlKey) {
+      event.preventDefault();
+      void flowInstanceRef.current?.fitView(fitViewOptions);
+    }
+    if (
+      event.key.toLowerCase() === "d" &&
+      (event.metaKey || event.ctrlKey) &&
+      selected
+    ) {
+      event.preventDefault();
+      void duplicateNode(selected.id);
+    }
+    if (
+      event.key.toLowerCase() === "b" &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      selected?.data.activeVersionId
+    ) {
+      event.preventDefault();
+      void branchVersion(selected.id, selected.data.activeVersionId);
+    }
+  };
 
   return (
     <DesignNodeActionsContext.Provider value={actions}>
@@ -1020,6 +1031,8 @@ export function GraphWorkspace({
           aria-label="Project graph workspace"
           className="min-h-0 flex-1"
           ref={canvasRef}
+          tabIndex={0}
+          onKeyDownCapture={keydown}
         >
           <ReactFlow<WorkspaceNode, WorkspaceEdge>
             defaultEdgeOptions={defaultEdgeOptions}
@@ -1049,6 +1062,7 @@ export function GraphWorkspace({
               flowInstanceRef.current = instance;
             }}
             onNodesChange={onNodesChange}
+            onPaneClick={() => canvasRef.current?.focus()}
             onBeforeDelete={async ({ nodes: removing }) => {
               const approved =
                 removing.length === 0 ||

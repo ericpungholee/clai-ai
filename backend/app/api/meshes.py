@@ -102,6 +102,13 @@ def create_mesh(
     try:
         enqueuer.enqueue(version_id, data.attempt_id)
     except Exception as error:
+        mesh = db.scalar(
+            select(VersionMesh)
+            .where(VersionMesh.version_id == version_id)
+            .with_for_update()
+        )
+        if mesh.status != "queued" or mesh.attempt_id != data.attempt_id:
+            return mesh_data(mesh)
         mesh.status = "failed"
         mesh.error = "The 3D job could not be queued. Your image is unchanged."
         db.commit()

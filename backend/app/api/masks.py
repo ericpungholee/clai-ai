@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from io import BytesIO
 from typing import Literal
 
@@ -13,6 +14,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.domain.runs import MaskSnapshot
 from app.models.graph import GraphEdge, GraphNode, Version
+from app.models.project import Project
 from app.providers.fal_transport import FalSdkTransport
 from app.providers.sam import SamSelector
 from app.schemas.graph import MaskData
@@ -46,7 +48,7 @@ def put_mask(
     data: MaskData | None = None,
     db: Session = Depends(get_db),
 ) -> MaskData | None:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
     node = db.scalar(
         select(GraphNode)
         .where(
@@ -93,6 +95,7 @@ def put_mask(
             data.height,
         )
         node.mask_subject_version_id = data.subject_version_id
+    project.updated_at = datetime.now(UTC)
     db.commit()
     return data
 
@@ -105,16 +108,21 @@ def select_region(
     db: Session = Depends(get_db),
     selector: SamSelector = Depends(get_sam_selector),
 ) -> MaskData | None:
-    version = db.scalar(
-        select(Version)
+    artifact_url = db.scalar(
+        select(Version.artifact_url)
         .join(GraphNode, GraphNode.id == Version.node_id)
-        .where(Version.id == version_id, GraphNode.project_id == project_id)
+        .join(Project, Project.id == GraphNode.project_id)
+        .where(
+            Version.id == version_id,
+            GraphNode.project_id == project_id,
+            Project.deleted_at.is_(None),
+        )
     )
-    if version is None:
+    if artifact_url is None:
         raise HTTPException(404, "Version not found")
     if not data.text.strip() and not data.points:
         raise HTTPException(422, "Click the image or describe an area to select")
-    artifact = create_artifact_reader(settings).read(version.artifact_url)
+    artifact = create_artifact_reader(settings).read(artifact_url)
     width, height = Image.open(BytesIO(artifact.content)).size
     if any(point.x >= width or point.y >= height for point in data.points):
         raise HTTPException(422, "Selection points must be inside the image")

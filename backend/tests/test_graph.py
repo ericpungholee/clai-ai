@@ -336,6 +336,13 @@ def test_navy_shoe_acceptance_runs_real_pipeline_with_fake_provider(
     assert wire.status_code == 200
     preview = client.get(f"/api/projects/{project_id}/nodes/{branch['id']}/run-preview")
     assert preview.json() == {"op": "edit_instruct"}
+    with TestingSessionLocal() as db:
+        assert (
+            db.scalar(
+                select(RunJob.id).where(RunJob.node_id == uuid.UUID(branch["id"]))
+            )
+            is None
+        )
 
     queued = client.post(
         f"/api/projects/{project_id}/nodes/{branch['id']}/runs",
@@ -343,6 +350,12 @@ def test_navy_shoe_acceptance_runs_real_pipeline_with_fake_provider(
     )
     assert queued.status_code == 202
     job_id = enqueuer.job_ids[-1]
+    duplicate = client.post(
+        f"/api/projects/{project_id}/nodes/{branch['id']}/runs",
+        json={"idempotency_key": "second-tab"},
+    )
+    assert duplicate.json()["id"] == str(job_id)
+    assert enqueuer.job_ids.count(job_id) == 1
 
     client.patch(
         f"/api/projects/{project_id}/nodes/{branch['id']}",
@@ -356,9 +369,7 @@ def test_navy_shoe_acceptance_runs_real_pipeline_with_fake_provider(
         scorer=FakeDinoV2Scorer(),
     )
 
-    assert provider.requests[-1].prompt_at_runtime.endswith(
-        "Change only: make it navy\nDo not restyle or reinterpret any other element."
-    )
+    assert provider.requests[-1].prompt_at_runtime.endswith("Instruction: make it navy")
     assert provider.requests[-1].input_snapshot.subject_version_id == str(
         subject_version_id
     )

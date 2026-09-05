@@ -1,11 +1,12 @@
 from app.domain.runs import Op
 
 PRESERVATION_PREAMBLE = (
-    "Preserve exactly every unmentioned attribute, including geometry,\n"
-    "proportions, silhouette, camera angle, framing, lighting direction,\n"
-    "and background.\n"
-    "Change only: {resolved_user_prompt}\n"
-    "Do not restyle or reinterpret any other element."
+    "This is an edit of the attached image. Keep the same object and the same\n"
+    "photograph: same camera angle, same framing, same background.\n"
+    "Keep every attribute the instruction does not mention.\n"
+    "The instruction may change any attribute it names, including form,\n"
+    "proportions, colour, material, and finish. Apply it fully.\n\n"
+    "Instruction: {resolved_user_prompt}"
 )
 
 EDIT_OPS = frozenset(

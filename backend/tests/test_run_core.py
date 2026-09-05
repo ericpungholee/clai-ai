@@ -271,11 +271,12 @@ def test_seed_precedence_is_override_then_subject_then_random() -> None:
 
 def test_edit_prompt_uses_the_accepted_preamble_exactly() -> None:
     assert build_prompt(user_prompt="  make it navy  ", op=Op.EDIT_INSTRUCT) == (
-        "Preserve exactly every unmentioned attribute, including geometry,\n"
-        "proportions, silhouette, camera angle, framing, lighting direction,\n"
-        "and background.\n"
-        "Change only: make it navy\n"
-        "Do not restyle or reinterpret any other element."
+        "This is an edit of the attached image. Keep the same object and the same\n"
+        "photograph: same camera angle, same framing, same background.\n"
+        "Keep every attribute the instruction does not mention.\n"
+        "The instruction may change any attribute it names, including form,\n"
+        "proportions, colour, material, and finish. Apply it fully.\n\n"
+        "Instruction: make it navy"
     )
     assert "{resolved_user_prompt}" in PRESERVATION_PREAMBLE
 

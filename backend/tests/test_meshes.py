@@ -1,10 +1,12 @@
 import json
 import struct
 import uuid
+from io import BytesIO
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.api.meshes import get_mesh_enqueuer
 from app.main import app
@@ -42,7 +44,11 @@ class Reader:
                 "model/gltf-binary",
                 "model.glb",
             )
-        return ArtifactBytes(b"fixture", "image/png", "image.png")
+        image = BytesIO()
+        Image.new("RGB", (4, 4), "grey").save(image, "WEBP")
+        return ArtifactBytes(
+            image.getvalue(), "application/octet-stream", "preview.webp"
+        )
 
 
 class Transport:
@@ -62,7 +68,9 @@ class Transport:
     def result(self, *, endpoint: str, request_id: str) -> dict[str, object]:
         return {
             "task_id": "fake",
-            "model_mesh": {"url": "https://provider.test/model.glb"},
+            "model_mesh": None,
+            "base_model": {"url": "https://provider.test/model.glb"},
+            "pbr_model": None,
             "rendered_image": {"url": "https://provider.test/preview.png"},
         }
 
@@ -126,6 +134,7 @@ def test_mesh_is_a_version_cache_with_uploaded_input_and_ingested_assets(
     assert cached["status"] == "complete"
     assert cached["artifact_url"].startswith("https://clai.test/assets/")
     assert cached["preview_url"].startswith("https://clai.test/assets/")
+    assert cached["preview_url"].endswith(".webp")
     assert client.get(f"{prefix}/{second}/mesh").json() is None
     assert (
         client.put(f"{prefix}/{first}/visibility", json={"hidden": True}).status_code

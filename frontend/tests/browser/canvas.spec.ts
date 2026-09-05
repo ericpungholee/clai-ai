@@ -14,6 +14,9 @@ test("a fifty-node canvas supports fit, new-node and duplicate shortcuts", async
   await page
     .locator(".react-flow__pane")
     .click({ position: { x: 10, y: 400 } });
+  await expect(
+    page.getByRole("main", { name: "Project graph workspace" }),
+  ).toBeFocused();
   await page.keyboard.press("f");
   await page.keyboard.press("n");
   await expect
@@ -88,7 +91,6 @@ test("run progress survives reload and completion preserves the newer editable d
   await editor.fill("Frozen run instruction");
   await node.getByRole("button", { name: "Run", exact: true }).click();
   await expect(node.getByText(/Waiting for a worker/)).toBeVisible();
-  await page.screenshot({ path: "../.progress/phase-f-canvas.png" });
   await page.reload();
   await expect(node.getByText(/Waiting for a worker/)).toBeVisible();
   await editor.fill("A newer draft during generation");

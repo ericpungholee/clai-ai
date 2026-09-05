@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.models.graph import Version
+from app.models.graph import RunJob, Version
 from app.models.project import Project
 from app.services.run_queue import get_run_enqueuer
 from tests.conftest import TestingSessionLocal
@@ -43,6 +43,27 @@ def test_worker_configuration_failure_cannot_leave_a_run_stuck(
     assert graph["nodes"][0]["run"]["attempts"] == 0
 
 
+def test_enqueue_response_failure_does_not_overwrite_a_started_job(
+    client: TestClient,
+) -> None:
+    project = create_project(client)
+    node = create_node(client, project, prompt="Lamp")
+
+    class AcceptedQueue:
+        def enqueue(self, job_id: uuid.UUID) -> None:
+            with TestingSessionLocal.begin() as db:
+                db.get(RunJob, job_id).status = "provider_pending"
+            raise OSError("Queue accepted the job but the connection broke")
+
+    app.dependency_overrides[get_run_enqueuer] = AcceptedQueue
+    response = client.post(
+        f"/api/projects/{project}/nodes/{node['id']}/runs",
+        json={"idempotency_key": "ambiguous-queue-response"},
+    )
+    assert response.status_code == 202
+    assert response.json()["status"] == "provider_pending"
+
+
 def test_home_activity_thumbnail_rename_and_delete_retain_images(
     client: TestClient,
 ) -> None:
@@ -61,6 +82,12 @@ def test_home_activity_thumbnail_rename_and_delete_retain_images(
         == 200
     )
     assert client.get("/api/projects").json()[0]["name"] == "Renamed"
+    branch = client.post(
+        f"/api/projects/{first}/versions/{version}/branches",
+        json={"position": {"x": 500, "y": 0}},
+    )
+    assert branch.status_code == 201
+    assert client.get("/api/projects").json()[0]["id"] == first
     assert client.delete(f"/api/projects/{first}").status_code == 204
     assert len(client.get("/api/projects").json()) == 1
     assert client.get(f"/api/projects/{first}/graph").status_code == 404

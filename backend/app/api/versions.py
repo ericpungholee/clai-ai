@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -9,7 +10,6 @@ from sqlalchemy.orm import Session
 from app.api.graph import get_project_or_404
 from app.core.database import get_db
 from app.models.graph import GraphNode, RunJob, Version, VersionVisibility
-from app.services.prompt_builder import PRESERVATION_PREAMBLE
 
 router = APIRouter(prefix="/api/projects/{project_id}/versions", tags=["versions"])
 
@@ -50,7 +50,7 @@ def update_visibility(
     data: VisibilityUpdate,
     db: Session = Depends(get_db),
 ) -> Response:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
     version = project_version(project_id, version_id, db)
     visibility = db.get(VersionVisibility, version_id)
     if data.hidden and visibility is None:
@@ -70,6 +70,7 @@ def update_visibility(
             .limit(1)
         )
         node.revision += 1
+    project.updated_at = datetime.now(UTC)
     db.commit()
     return Response(status_code=204)
 
@@ -101,7 +102,14 @@ def preview_collapse(
         job = db.get(RunJob, current.run_job_id)
         instruction = job.frozen_request.get("user_prompt") if job else None
         if not isinstance(instruction, str) or not instruction.strip():
-            prefix, suffix = PRESERVATION_PREAMBLE.split("{resolved_user_prompt}")
+            # Pre-document runs lack user_prompt; parse only their exact legacy
+            # envelope, never reinterpret or rewrite the immutable stored text.
+            prefix = (
+                "Preserve exactly every unmentioned attribute, including geometry,\n"
+                "proportions, silhouette, camera angle, framing, lighting direction,\n"
+                "and background.\nChange only: "
+            )
+            suffix = "\nDo not restyle or reinterpret any other element."
             runtime = current.prompt_at_runtime
             if not runtime.startswith(prefix) or not runtime.endswith(suffix):
                 return CollapseUnavailable(

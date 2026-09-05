@@ -1,7 +1,7 @@
 {
   "artifact_location": {
     "external_urls": "recorded per pair; provider output URLs are not durable",
-    "repository_path": ".progress/p0-zero-spike",
+    "repository_path": ".data/drift-corpus",
     "repository_status": "gitignored"
   },
   "corpus_id": "clai-p0-zero-2026-09-03",

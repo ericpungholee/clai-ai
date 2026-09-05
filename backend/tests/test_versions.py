@@ -1,4 +1,5 @@
 import uuid
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -113,7 +114,16 @@ def test_collapse_does_not_guess_historical_instructions(client: TestClient) -> 
         f"{url}/{root}/branches",
         json={"prompt": "Make it blue", "position": {"x": 1, "y": 1}},
     ).json()
-    _, edit = submit_and_execute(client, project, branch["node"]["id"], queue, provider)
+    legacy = (
+        "Preserve exactly every unmentioned attribute, including geometry,\n"
+        "proportions, silhouette, camera angle, framing, lighting direction,\n"
+        "and background.\nChange only: {resolved_user_prompt}\n"
+        "Do not restyle or reinterpret any other element."
+    )
+    with patch("app.services.prompt_builder.PRESERVATION_PREAMBLE", legacy):
+        _, edit = submit_and_execute(
+            client, project, branch["node"]["id"], queue, provider
+        )
     with TestingSessionLocal() as db:
         job = db.scalar(
             select(RunJob)

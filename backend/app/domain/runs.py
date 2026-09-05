@@ -28,9 +28,6 @@ class ActivePin:
     mode: Literal["active"] = field(default="active", init=False)
 
 
-type Pin = VersionPin | ActivePin
-
-
 @dataclass(frozen=True)
 class SubjectEdge:
     id: str

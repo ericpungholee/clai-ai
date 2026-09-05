@@ -18,7 +18,7 @@ Clai is a node-based canvas for concepting physical products with AI. Wiring an 
 - Version-specific Tripo 3D form view, default grey geometry ($0.20), optional standard textures ($0.30), first-party GLB/preview storage, and explicit occlusion warnings.
 - Durable run progress across reloads, draft conflict handling across tabs, node duplication, canvas shortcuts and project rename/delete with retained history.
 
-Live acceptance gates remain: the tested preamble candidate is held after background/framing drift, masked runs with connect images block pending the provider-routing decision, and the first Tripo contract attempt returned 422. No successful 3D generation latency is claimed. See `.progress/current.md`; phase PRs remain drafts. Auth and deployment are out of scope.
+Limits: FLUX Fill cannot accept connect images, so mask + connect runs are explicitly blocked. Chain collapse supports plain instruction edits; it cannot safely replay masks or reference-image positions against a different root. Unmasked preservation is model-dependent, not a pixel guarantee. The Tripo contract check succeeded in about 72 seconds through upload and provider response, before download; queue time and textures may take longer. Auth and deployment are out of scope.
 
 ## Stack
 
@@ -50,6 +50,8 @@ Create the local environment file and set `POSTGRES_PASSWORD`:
 ```bash
 cp .env.example .env
 ```
+
+Set `FAL_KEY` to enable generation, SAM selection and 3D. Artifacts default to a shared local volume; both the API and worker must use the same storage. Provider outputs are copied there before committing a version or mesh cache.
 
 ```bash
 make dev
@@ -91,3 +93,9 @@ make db-shell
 and Redis connectivity. PostgreSQL data persists across `make down`.
 
 The PostgreSQL suite uses a disposable test service and validates the version-mutation trigger, role/pin constraint, one-subject partial index, graph reset and subject-rename migrations, concurrent two-connect cap, and full fake-provider navy-shoe path. Automated tests never call fal.
+
+The saved 100-pair regression corpus is local under `.data/drift-corpus`, with its index and per-operation baselines in `backend/tests/fixtures/drift-corpus-manifest.json`. Run the offline report without new generations:
+
+```bash
+backend/.venv/bin/python backend/scripts/report_drift_regression.py --observations .data/drift-corpus/metrics.json
+```

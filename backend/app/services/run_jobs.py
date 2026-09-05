@@ -11,6 +11,7 @@ from app.domain.prompts import compile_document
 from app.domain.runs import (
     ActivePin,
     ConnectEdge,
+    FrozenRunRequest,
     MaskSnapshot,
     NodeSettings,
     NodeSnapshot,
@@ -36,6 +37,56 @@ def submit_run(
     db: Session,
     random_seed: Callable[[], int] | None = None,
 ) -> tuple[RunJob, bool]:
+    target_row = _lock_target(project_id, node_id, db)
+    existing = db.scalar(
+        select(RunJob).where(
+            RunJob.node_id == node_id,
+            RunJob.idempotency_key == idempotency_key,
+        )
+    )
+    if existing is not None:
+        return existing, False
+
+    # A response can be lost after enqueue, or another tab can still show Run.
+    # Reuse the in-flight job instead of charging for a duplicate generation.
+    running = db.scalar(
+        select(RunJob)
+        .where(
+            RunJob.node_id == node_id,
+            RunJob.status.in_(
+                ("queued", "dispatching", "provider_pending", "ingesting")
+            ),
+        )
+        .order_by(RunJob.created_at.desc(), RunJob.id.desc())
+        .limit(1)
+    )
+    if running is not None:
+        return running, False
+
+    frozen = _freeze_node_run(
+        target_row, db, random_seed or (lambda: secrets.randbits(32))
+    )
+    job = RunJob(
+        id=uuid.uuid4(),
+        project_id=project_id,
+        node_id=node_id,
+        idempotency_key=idempotency_key,
+        status="queued",
+        frozen_request=encode_frozen_request(frozen),
+        attempts=0,
+        queued_at=datetime.now(UTC),
+    )
+    db.add(job)
+    db.flush()
+    return job, True
+
+
+def preview_run(*, project_id: uuid.UUID, node_id: uuid.UUID, db: Session) -> str:
+    target = _lock_target(project_id, node_id, db)
+    return _freeze_node_run(target, db, lambda: 0).op.value
+
+
+def _lock_target(project_id: uuid.UUID, node_id: uuid.UUID, db: Session) -> GraphNode:
     # A project-sized mutation lock gives all graph reads one coherent snapshot
     # and avoids opposing node-lock orders when two nodes reference each other.
     db.scalar(select(Project).where(Project.id == project_id).with_for_update())
@@ -51,14 +102,13 @@ def submit_run(
     if target_row is None:
         raise RunSubmissionError("Node not found")
 
-    existing = db.scalar(
-        select(RunJob).where(
-            RunJob.node_id == node_id,
-            RunJob.idempotency_key == idempotency_key,
-        )
-    )
-    if existing is not None:
-        return existing, False
+    return target_row
+
+
+def _freeze_node_run(
+    target_row: GraphNode, db: Session, random_seed: Callable[[], int]
+) -> FrozenRunRequest:
+    node_id = target_row.id
 
     edge_rows = list(
         db.scalars(
@@ -145,41 +195,14 @@ def submit_run(
         inbound_edges=tuple(_edge_snapshot(edge) for edge in edge_rows),
         nodes=nodes,
         versions=versions,
-        random_seed=random_seed or (lambda: secrets.randbits(32)),
+        random_seed=random_seed,
     )
     if frozen.mask is not None and frozen.connects:
         raise RunSubmissionError(
             "FLUX Fill cannot use connect images. Remove the connect chips "
             "or clear the mask before running."
         )
-    job = RunJob(
-        id=uuid.uuid4(),
-        project_id=project_id,
-        node_id=node_id,
-        idempotency_key=idempotency_key,
-        status="queued",
-        frozen_request=encode_frozen_request(frozen),
-        attempts=0,
-        queued_at=datetime.now(UTC),
-    )
-    db.add(job)
-    db.flush()
-    return job, True
-
-
-def preview_run(*, project_id: uuid.UUID, node_id: uuid.UUID, db: Session) -> str:
-    job, created = submit_run(
-        project_id=project_id,
-        node_id=node_id,
-        idempotency_key=f"preview:{uuid.uuid4()}",
-        db=db,
-        random_seed=lambda: 0,
-    )
-    op = str(job.frozen_request["op"])
-    if created:
-        db.expunge(job)
-    db.rollback()
-    return op
+    return frozen
 
 
 def _node_snapshot(node: GraphNode) -> NodeSnapshot:

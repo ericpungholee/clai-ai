@@ -56,6 +56,7 @@ def execute_mesh_job(
             reader=output_reader,
             store=store,
             attempt_id=str(attempt_id),
+            textured=texture == "standard",
         )
         with session_factory.begin() as db:
             mesh = db.get(VersionMesh, version_id)

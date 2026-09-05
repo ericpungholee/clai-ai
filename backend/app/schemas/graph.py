@@ -95,9 +95,6 @@ class ActivePinData(BaseModel):
     mode: Literal["active"] = "active"
 
 
-PinData = Annotated[VersionPinData | ActivePinData, Field(discriminator="mode")]
-
-
 class SubjectEdgeData(BaseModel):
     id: uuid.UUID
     source_node_id: uuid.UUID

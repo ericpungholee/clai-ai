@@ -147,8 +147,9 @@ export function MeshViewer({
                   </p>
                 ) : null}
                 <p className="mb-3 text-sm">
-                  Generate once, then reuse this version’s cached view.
-                  Generation latency has not yet been verified.
+                  Generate once, then reuse this version’s cached view. Our
+                  untextured check took about 72 seconds before download; queue
+                  time and textured generation may take longer.
                 </p>
                 <label className="flex items-center justify-center gap-2 text-sm">
                   <input
