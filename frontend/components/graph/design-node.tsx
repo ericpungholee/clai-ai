@@ -20,6 +20,8 @@ export const DesignNode = memo(function DesignNode({
   const staleMask =
     data.mask !== null &&
     data.mask.subject_version_id !== data.subject?.versionId;
+  const meshPreview =
+    data.meshPreview?.versionId === activeVersion?.id ? data.meshPreview : null;
   const brokenConnect = data.connects.some((ref) => ref.state !== "ready");
   const fullMask =
     data.mask !== null &&
@@ -51,12 +53,16 @@ export const DesignNode = memo(function DesignNode({
         <button
           className="nodrag block w-full cursor-zoom-in"
           aria-label="Inspect active image"
-          onClick={() => actions.viewVersions([activeVersion.id])}
+          onClick={() =>
+            meshPreview
+              ? actions.viewMesh(activeVersion.id)
+              : actions.viewVersions([activeVersion.id])
+          }
         >
           <ArtifactImage
             alt={`${data.title} active version`}
             className="aspect-[4/3] w-full rounded-lg bg-neutral-100 object-cover"
-            src={activeVersion.artifact_url}
+            src={meshPreview?.url ?? activeVersion.artifact_url}
           />
         </button>
       ) : (
@@ -75,6 +81,28 @@ export const DesignNode = memo(function DesignNode({
           <span className="self-center text-neutral-400">
             {activeVersion.edit_depth} edit hops
           </span>
+        </div>
+      ) : null}
+      {activeVersion ? (
+        <div
+          className="nodrag mt-2 flex items-center gap-1 text-[11px]"
+          role="group"
+          aria-label="Version view"
+        >
+          <button
+            aria-pressed={!meshPreview}
+            className="rounded border px-2 py-1"
+            onClick={() => actions.viewImage(id)}
+          >
+            2D image
+          </button>
+          <button
+            aria-pressed={!!meshPreview}
+            className="rounded border px-2 py-1"
+            onClick={() => actions.viewMesh(activeVersion.id)}
+          >
+            3D form
+          </button>
         </div>
       ) : null}
       {activeVersion && activeVersion.edit_depth >= 5 ? (

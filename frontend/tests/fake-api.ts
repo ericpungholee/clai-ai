@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import type { GraphDocument } from "../lib/graph.ts";
+import type { MeshData } from "../lib/meshes.ts";
 
 const project = {
   id: "fixture-project",
@@ -81,6 +82,47 @@ function fixture(): GraphDocument {
   };
 }
 let graph = fixture();
+const meshes = new Map<string, MeshData>();
+
+function meshFixture(): Buffer {
+  const binary = Buffer.alloc(36);
+  [-1, 0, 0, 1, 0, 0, 0, 2, 0].forEach((value, index) =>
+    binary.writeFloatLE(value, index * 4),
+  );
+  const document = {
+    asset: { version: "2.0" },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, material: 0 }] }],
+    materials: [{ doubleSided: true }],
+    buffers: [{ byteLength: binary.length }],
+    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: binary.length }],
+    accessors: [
+      {
+        bufferView: 0,
+        componentType: 5126,
+        count: 3,
+        type: "VEC3",
+        min: [-1, 0, 0],
+        max: [1, 2, 0],
+      },
+    ],
+  };
+  let json = JSON.stringify(document);
+  json += " ".repeat((4 - (json.length % 4)) % 4);
+  const encoded = Buffer.from(json);
+  const header = Buffer.alloc(20);
+  header.write("glTF");
+  header.writeUInt32LE(2, 4);
+  header.writeUInt32LE(28 + encoded.length + binary.length, 8);
+  header.writeUInt32LE(encoded.length, 12);
+  header.writeUInt32LE(0x4e4f534a, 16);
+  const binHeader = Buffer.alloc(8);
+  binHeader.writeUInt32LE(binary.length);
+  binHeader.writeUInt32LE(0x004e4942, 4);
+  return Buffer.concat([header, encoded, binHeader, binary]);
+}
 
 createServer(async (request, response) => {
   response.setHeader("Access-Control-Allow-Origin", "*");
@@ -101,7 +143,29 @@ createServer(async (request, response) => {
   }
   if (path === "/reset") {
     graph = fixture();
+    meshes.clear();
     response.end("{}");
+    return;
+  }
+  if (path === "/artifacts/mesh.glb") {
+    response.setHeader("Content-Type", "model/gltf-binary");
+    response.end(meshFixture());
+    return;
+  }
+  if (path.endsWith("/mesh")) {
+    const versionId = path.split("/versions/")[1].split("/")[0];
+    if (request.method === "POST" && !meshes.has(versionId))
+      meshes.set(versionId, {
+        version_id: versionId,
+        attempt_id: body.attempt_id,
+        status: "complete",
+        texture: body.texture,
+        artifact_url: "http://127.0.0.1:8109/artifacts/mesh.glb",
+        preview_url: "http://127.0.0.1:8109/artifacts/subject.svg",
+        elapsed_seconds: 42,
+        error: null,
+      });
+    response.end(JSON.stringify(meshes.get(versionId) ?? null));
     return;
   }
   if (path === "/stale") {
