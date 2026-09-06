@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models.graph import RunJob
-from app.services.run_execution import PendingDinoV2Scorer, execute_run_job
+from app.services.run_execution import execute_run_job
 from app.services.run_queue import get_run_enqueuer
 from tests.conftest import TestingSessionLocal
 from tests.test_graph import (
@@ -70,7 +70,6 @@ def test_atomic_chips_order_active_following_broken_refs_and_conflicts(
         session_factory=TestingSessionLocal,
         provider=provider,
         ingestor=FakeIngestor(),
-        scorer=PendingDinoV2Scorer(),
     )
     # A new draft may reorder references; existing results remain frozen.
     target = create_node(client, project, prompt="")
@@ -102,7 +101,6 @@ def test_atomic_chips_order_active_following_broken_refs_and_conflicts(
         session_factory=TestingSessionLocal,
         provider=provider,
         ingestor=FakeIngestor(),
-        scorer=PendingDinoV2Scorer(),
     )
     assert client.delete(f"/api/projects/{project}/nodes/{b['id']}").status_code == 204
     graph = client.get(f"/api/projects/{project}/graph").json()

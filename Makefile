@@ -1,4 +1,4 @@
-.PHONY: dev down logs migrate revision backend-shell db-shell test lint
+.PHONY: dev down logs migrate revision backend-shell db-shell test test-postgres test-browser lint build
 
 dev:
 	docker compose up --build
@@ -22,10 +22,20 @@ db-shell:
 	docker compose exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
 
 test:
-	docker compose exec frontend npm run lint
-	docker compose exec frontend npm run typecheck
+	docker compose run --rm backend uv run pytest -m "not postgres"
+	docker compose run --rm --no-deps frontend npm test
+
+test-postgres:
+	docker compose --profile test run --rm backend-test
+
+test-browser:
+	npm --prefix frontend run test:browser
 
 lint:
-	docker compose exec backend uv run ruff check app alembic
-	docker compose exec backend uv run ruff format --check app alembic
-	docker compose exec frontend npm run lint
+	docker compose run --rm --no-deps backend uv run ruff check app tests alembic
+	docker compose run --rm --no-deps backend uv run ruff format --check app tests alembic
+	docker compose run --rm --no-deps frontend npm run lint
+	docker compose run --rm --no-deps frontend npm run typecheck
+
+build:
+	docker compose build

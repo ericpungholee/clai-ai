@@ -28,11 +28,6 @@ test-results/
 playwright-report/
 next-env.d.ts
 
-# Tests (local only)
-backend/tests/
-frontend/tests/
-frontend/playwright.config.ts
-
 # Editors
 .idea/
 .vscode/

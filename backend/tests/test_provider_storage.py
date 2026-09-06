@@ -1,4 +1,3 @@
-import subprocess
 from collections.abc import Mapping
 from io import BytesIO
 from pathlib import Path
@@ -511,36 +510,3 @@ def test_navy_shoe_acceptance_path_uses_only_fakes(tmp_path: Path) -> None:
     assert job.endpoint == "fal-ai/nano-banana-pro/edit"
     assert job.request_payload["prompt"] == frozen.prompt_at_runtime
     assert (tmp_path / "artifacts" / stored.storage_key).read_bytes() == content
-
-
-def test_drift_scoring_keeps_same_named_artifacts_separate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from app.services.drift import CommandDinoV2Scorer
-    from app.storage.artifacts import StoredArtifact
-
-    reader = FakeArtifactReader(
-        {
-            "clai://subject": ArtifactBytes(b"subject", "image/png", "output.png"),
-            "clai://generated": ArtifactBytes(b"generated", "image/png", "output.png"),
-        }
-    )
-
-    def run(
-        arguments: list[str], **_options: object
-    ) -> subprocess.CompletedProcess[str]:
-        assert Path(arguments[-2]).read_bytes() == b"subject"
-        assert Path(arguments[-1]).read_bytes() == b"generated"
-        return subprocess.CompletedProcess(arguments, 0, stdout="0.7")
-
-    monkeypatch.setattr(subprocess, "run", run)
-    scorer = CommandDinoV2Scorer(
-        command=("fake-scorer",), artifact_reader=reader, timeout_seconds=1
-    )
-    result = scorer.score(
-        request=request(Op.EDIT_INSTRUCT, subject=version("subject")),
-        artifact=StoredArtifact(
-            "generated", "clai://generated", "image/png", 9, "fake"
-        ),
-    )
-    assert result.status == "complete" and result.value == 0.7

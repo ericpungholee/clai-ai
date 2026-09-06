@@ -4,14 +4,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.domain.runs import FrozenRunRequest, Op
+from app.domain.runs import FrozenRunRequest
 from app.main import app
-from app.models.graph import GraphEdge, GraphNode, RunJob, Version, VersionMetric
+from app.models.graph import GraphEdge, GraphNode, RunJob, Version
 from app.providers.base import ProviderJob, ProviderResult
-from app.services.run_execution import (
-    ChangeMagnitudeResult,
-    execute_run_job,
-)
+from app.services.run_execution import execute_run_job
 from app.services.run_queue import get_run_enqueuer
 from app.storage.artifacts import StoredArtifact
 from tests.conftest import TestingSessionLocal
@@ -71,17 +68,6 @@ class FakeIngestor:
         )
 
 
-class FakeDinoV2Scorer:
-    def score(
-        self, *, request: FrozenRunRequest, artifact: StoredArtifact
-    ) -> ChangeMagnitudeResult:
-        assert request.op is Op.EDIT_INSTRUCT
-        assert artifact.artifact_url.endswith("same-shoe-navy.png")
-        return ChangeMagnitudeResult(
-            method="dinov2_cosine", status="complete", value=0.9301
-        )
-
-
 def create_project(client: TestClient, name: str = "Footwear") -> str:
     response = client.post("/api/projects", json={"name": name})
     assert response.status_code == 201
@@ -122,7 +108,6 @@ def submit_and_execute(
         session_factory=TestingSessionLocal,
         provider=provider,
         ingestor=FakeIngestor(),
-        scorer=FakeDinoV2Scorer(),
     )
     return response.json(), version_id
 
@@ -376,7 +361,6 @@ def test_navy_shoe_acceptance_runs_real_pipeline_with_fake_provider(
         session_factory=TestingSessionLocal,
         provider=provider,
         ingestor=FakeIngestor(),
-        scorer=FakeDinoV2Scorer(),
     )
 
     assert provider.requests[-1].prompt_at_runtime.endswith(
@@ -396,12 +380,11 @@ def test_navy_shoe_acceptance_runs_real_pipeline_with_fake_provider(
         "mask_hash": None,
     }
     with TestingSessionLocal() as db:
-        metric = db.get(VersionMetric, navy_version_id)
-        assert metric is not None
-        assert metric.op == "edit_instruct"
-        assert metric.method == "dinov2_cosine"
-        assert metric.change_magnitude == 0.9301
-        assert db.scalar(select(RunJob.status).where(RunJob.id == job_id)) == "complete"
+        job = db.get(RunJob, job_id)
+        assert job is not None and job.status == "complete"
+        assert job.provider_elapsed_seconds is not None
+        assert job.total_elapsed_seconds is not None
+        assert job.total_elapsed_seconds >= job.provider_elapsed_seconds
 
 
 def test_commit_is_idempotent_at_version_boundary(client: TestClient) -> None:

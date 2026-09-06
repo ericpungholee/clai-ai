@@ -20,7 +20,6 @@ from app.services.run_execution import execute_run_job
 from app.services.run_queue import get_run_enqueuer
 from tests.test_graph import (
     CapturingEnqueuer,
-    FakeDinoV2Scorer,
     FakeIngestor,
     FakeProvider,
 )
@@ -403,10 +402,6 @@ def test_version_trigger_rejects_updates_and_deletes(
         project_id = insert_project(connection)
         node_id = insert_node(connection, project_id)
         version_id = insert_version(connection, project_id, node_id)
-        connection.execute(
-            text("INSERT INTO version_visibility (version_id) VALUES (:id)"),
-            {"id": version_id},
-        )
 
     for statement in (
         "UPDATE versions SET artifact_url = 'https://changed.test' WHERE id = :id",
@@ -626,7 +621,6 @@ def test_navy_shoe_path_runs_end_to_end_on_postgres_with_fake_provider(
                 session_factory=postgres_sessions,
                 provider=provider,
                 ingestor=FakeIngestor(),
-                scorer=FakeDinoV2Scorer(),
             )
 
             branch = client.post(
@@ -654,7 +648,6 @@ def test_navy_shoe_path_runs_end_to_end_on_postgres_with_fake_provider(
                 session_factory=postgres_sessions,
                 provider=provider,
                 ingestor=FakeIngestor(),
-                scorer=FakeDinoV2Scorer(),
             )
             graph = client.get(f"/api/projects/{project['id']}/graph").json()
 

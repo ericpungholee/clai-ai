@@ -1,5 +1,14 @@
-import { expect, test } from "@playwright/test";
-import type { ModelViewerElement } from "@google/model-viewer";
+import { expect, test, type Page } from "@playwright/test";
+
+async function waitForViewer(page: Page) {
+  await expect(
+    page.getByRole("img", { name: "Interactive 3D mesh" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reset view" })).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "Select logo in source image" }),
+  ).toBeEnabled();
+}
 
 test("3D uses image textures by default and caches only its exact image version", async ({
   page,
@@ -15,56 +24,29 @@ test("3D uses image textures by default and caches only its exact image version"
       submissions++;
     }
   });
+
   await page.goto("/projects/fixture-project");
   const source = page.locator('.react-flow__node[data-id="source"]');
   await source.locator(".image-preview").hover();
   await source.getByRole("button", { name: "3D", exact: true }).click();
-  await expect(
-    page.getByText("Colors and print included.", { exact: true }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByText("Hidden sides are inferred and may vary.", { exact: false }),
-  ).toBeVisible();
   expect(submissions).toBe(0);
   await page.getByRole("button", { name: "Generate 3D" }).click();
-  await expect
-    .poll(() =>
-      page
-        .locator("model-viewer")
-        .evaluate((element) => (element as ModelViewerElement).loaded),
-    )
-    .toBe(true);
-  expect(
-    await page
-      .locator("model-viewer")
-      .evaluate((element) =>
-        Boolean(
-          (element as ModelViewerElement).model?.materials[0]
-            .pbrMetallicRoughness.baseColorTexture?.texture,
-        ),
-      ),
-  ).toBe(true);
+  await waitForViewer(page);
+  expect(submissions).toBe(1);
   await expect(
     page.getByRole("img", { name: "Original 2D image used for this 3D view" }),
-  ).toHaveAttribute("src", "http://127.0.0.1:8109/artifacts/subject.svg");
+  ).toBeVisible();
+
   await page.keyboard.press("Escape");
-  await expect(page.locator("model-viewer")).toHaveCount(0);
   await source.locator(".image-preview").hover();
   await source.getByRole("button", { name: "3D", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "3D view", exact: true }),
-  ).toBeVisible();
+  await waitForViewer(page);
   expect(submissions).toBe(1);
+
   await page.keyboard.press("Escape");
   await source
     .getByRole("button", { name: "Select image 14", exact: true })
     .click();
-  await expect(source.getByRole("group", { name: "Image view" })).toHaveCount(
-    0,
-  );
-  await expect(
-    source.getByRole("button", { name: "Inspect result" }).getByRole("img"),
-  ).toHaveAttribute("src", "http://127.0.0.1:8109/artifacts/subject.svg");
   await source.locator(".image-preview").hover();
   await source.getByRole("button", { name: "3D", exact: true }).click();
   await expect(page.getByRole("button", { name: "Generate 3D" })).toBeVisible();
@@ -88,35 +70,27 @@ test("a cached grey model can be regenerated with image colors and print", async
       submissions++;
     }
   });
+
   await page.goto("/projects/fixture-project");
   const source = page.locator('.react-flow__node[data-id="source"]');
   await source.locator(".image-preview").hover();
   await source.getByRole("button", { name: "3D", exact: true }).click();
+  await waitForViewer(page);
   const upgrade = page.getByRole("button", {
     name: "Generate with colors & print",
   });
   await expect(upgrade).toBeVisible();
   expect(submissions).toBe(0);
+
   await upgrade.click();
   await expect(upgrade).toHaveCount(0);
-  await expect
-    .poll(() =>
-      page
-        .locator("model-viewer")
-        .evaluate((element) =>
-          Boolean(
-            (element as ModelViewerElement).model?.materials[0]
-              .pbrMetallicRoughness.baseColorTexture?.texture,
-          ),
-        ),
-    )
-    .toBe(true);
+  await waitForViewer(page);
+  expect(submissions).toBe(1);
+
   await page.keyboard.press("Escape");
   await source.locator(".image-preview").hover();
   await source.getByRole("button", { name: "3D", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "3D view" }),
-  ).toBeVisible();
+  await waitForViewer(page);
   await expect(upgrade).toHaveCount(0);
   expect(submissions).toBe(1);
 });

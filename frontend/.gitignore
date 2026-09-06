@@ -10,10 +10,8 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
+# test output
 /coverage
-/tests
-playwright.config.ts
 
 # next.js
 /.next/

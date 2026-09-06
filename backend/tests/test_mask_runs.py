@@ -7,9 +7,9 @@ from pytest import MonkeyPatch
 
 from app.api import masks
 from app.main import app
-from app.models.graph import Version, VersionMetric
+from app.models.graph import Version
 from app.providers.base import ArtifactBytes
-from app.services.run_execution import PendingDinoV2Scorer, execute_run_job
+from app.services.run_execution import execute_run_job
 from app.services.run_queue import get_run_enqueuer
 from app.storage.artifacts import (
     ArtifactIngestor,
@@ -124,7 +124,6 @@ def test_mask_save_stale_block_and_frozen_composited_commit(
                 root=tmp_path, public_base_url="https://first.party"
             ),
         ),
-        scorer=PendingDinoV2Scorer(),
     )
     with TestingSessionLocal() as db:
         result = db.get(Version, version_id)
@@ -134,12 +133,6 @@ def test_mask_save_stale_block_and_frozen_composited_commit(
         assert (
             "remove the logo" in result.prompt_at_runtime
             and "newer draft" not in result.prompt_at_runtime
-        )
-        metric = db.get(VersionMetric, version_id)
-        assert (
-            metric is not None
-            and metric.method == "outside_feather_pixel_diff"
-            and metric.change_magnitude == 0
         )
     assert client.put(prefix + "/mask", json=mask).status_code == 409
     revised = client.post(

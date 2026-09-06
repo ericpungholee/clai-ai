@@ -1,92 +1,108 @@
 # Clai
 
-Clai is a canvas for designing physical products with AI. A draft produces one image and becomes a frozen result. Continue editing starts a new node from that image; the canvas is the edit history.
+[![CI](https://github.com/ericpungholee/clai-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/ericpungholee/clai-ai/actions/workflows/ci.yml)
 
-## Functionality
+Clai is a visual workspace for developing physical product concepts with generative AI. Each generation becomes an immutable point in a canvas-based edit history, so experiments stay visible, reproducible, and easy to branch.
 
-- Draft, running, result, and failed card states, enforced by API mutation guards.
-- Continue editing creates a new draft to the right. Failed runs remain editable and retryable.
-- Solid input-image wires and up to two dashed references, with numbered prompt chips.
-- Area selection with brush, lasso, rectangle, and SAM click/text selection. Saving outlines the input and focuses the prompt; Run generates the change.
-- FLUX Fill inpainting with a deterministic 3px composite seam. Pixels outside that band are preserved.
-- Durable database-backed runs with frozen requests, Celery transport, and first-party artifact ingestion.
-- Nano Banana Pro generation and unmasked editing through fal.
-- Canvas comparison of any two image nodes, full-size inspection, original downloads, and explicit editable chain collapse.
-- Tripo 3D views with full 360° rotation, image colors and print, source-logo placement, first-party GLB/preview storage, GLB exports, and textured replacement of older grey models. Hidden surfaces are inferred and fine details may vary.
-- Draft conflict recovery across tabs, retained images after source deletion, optional node names, canvas shortcuts, and project rename/delete.
-- Read-only image selection for older multi-image nodes; new nodes make one image each.
+## What it does
 
-References and area selections cannot be combined. Chain collapse supports plain instruction edits; it cannot replay selected regions or reference positions against another root. Unmasked preservation remains model-dependent. Auth and deployment are outside this implementation.
+- Generates product concepts and applies instruction-based edits through fal.
+- Connects prior images as a subject or as numbered visual references.
+- Edits selected regions with brush, lasso, rectangle, and SAM-assisted masks.
+- Preserves pixels outside masked edits with deterministic compositing.
+- Branches from any saved image without changing the original result.
+- Stores provider outputs locally or in S3-compatible object storage.
+- Creates, previews, and exports textured 3D meshes.
+- Persists durable run state through PostgreSQL, Redis, and Celery.
 
-## Stack
+![Next.js](https://img.shields.io/badge/Next.js-16-black) ![FastAPI](https://img.shields.io/badge/FastAPI-Python_3.12-009688) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1)
 
-- Next.js, React, TypeScript, Tailwind CSS, and React Flow
-- FastAPI, SQLAlchemy, and Alembic
-- PostgreSQL, Redis, and Celery
-- Docker Compose, npm, and uv
+## Run it locally
 
-## Architecture
-
-See [architecture.md](architecture.md) for the code-level system guide, data model, save/conflict behavior, provider pipelines, storage, and operational limits.
-
-React Flow owns immediate pan, zoom, selection, and drag state. Scoped FastAPI mutations persist editable drafts and input wires. Run submission resolves and freezes inputs synchronously into `run_jobs`; workers dispatch that frozen request. Provider output is copied into Clai storage before a transaction records the node's image. Successful nodes reject changes to generation inputs and cannot run again.
-
-```text
-React Flow → scoped FastAPI mutations → PostgreSQL
-                         ↓
-                 frozen run_jobs → Celery → fal → Clai artifact storage
-```
-
-## Local development
-
-Requirements:
-
-- Docker with Compose v2
-- Node.js 22+, Python 3.12+, and [uv](https://docs.astral.sh/uv/) for
-  development outside Docker
-
-Create the local environment file and set `POSTGRES_PASSWORD`:
+You need Docker with Compose v2 and a [fal API key](https://fal.ai/dashboard/keys). Provider-backed actions use your fal account and may incur charges.
 
 ```bash
+git clone https://github.com/ericpungholee/clai-ai.git
+cd clai-ai
 cp .env.example .env
 ```
 
-Set `FAL_KEY` to enable generation, SAM selection and 3D. Artifacts default to a shared local volume; both the API and worker must use the same storage. Provider outputs are copied there before committing a version or mesh cache.
-
-The frontend installs locked dependencies into its Docker volume before starting Next.js. Its build cache also uses a dedicated volume so Docker and local builds do not overwrite each other.
+Open `.env`, add your key as `FAL_KEY`, then start the application:
 
 ```bash
 make dev
-make migrate
 ```
 
-Open:
+The backend applies database migrations during startup. Once the services are healthy, open:
 
-- App: http://localhost:3000
-- API: http://localhost:8000
-- API docs: http://localhost:8000/docs
-- PostgreSQL: `localhost:5432`
-- Redis: `localhost:6379`
+- Web app: <http://localhost:3000>
+- API documentation: <http://localhost:8000/docs>
+- API health: <http://localhost:8000/health/ready>
 
-## Validation
+Stop the stack with `make down`. PostgreSQL data and generated artifacts remain in local Docker volumes and ignored workspace paths.
+
+## How it works
+
+```mermaid
+flowchart LR
+    UI[Next.js canvas] --> API[FastAPI]
+    API --> DB[(PostgreSQL)]
+    API --> Q[Redis / Celery]
+    Q --> W[Generation worker]
+    W --> F[fal providers]
+    W --> S[Artifact storage]
+    W --> DB
+```
+
+Submitting a run resolves its exact subject, references, mask, prompt, settings, and seed into a frozen database record. The worker executes that snapshot even if another browser tab changes the draft later. A successful run creates one immutable version; continuing an edit creates a new node linked to that version.
+
+Provider files are validated and copied into Clai-owned storage before the result is committed. The default filesystem backend works without cloud infrastructure. S3-compatible storage is available through the variables documented in [.env.example](.env.example).
+
+See [architecture.md](architecture.md) for the data model, provider routing, concurrency rules, storage boundaries, and known operational limits.
+
+## Development
+
+The Docker workflow is the shortest path to a consistent environment:
 
 ```bash
-make test
-make lint
-npm --prefix frontend run build
+make lint             # Ruff, formatting, ESLint, and TypeScript
+make test             # backend feature tests and frontend unit tests
+make test-postgres    # migration and PostgreSQL invariant tests
+make test-browser     # Playwright feature flows; requires local Node.js
+make build            # production container builds
 ```
 
-Useful development commands:
+For host development, install Node.js 22+, Python 3.12+, and [uv](https://docs.astral.sh/uv/):
 
 ```bash
-make dev
-make down
-make logs
-make migrate
-make revision MSG="describe change"
-make backend-shell
-make db-shell
+cd backend && uv sync && uv run pytest -m "not postgres"
+cd ../frontend && npm ci && npm run lint && npm run typecheck && npm test
 ```
 
-`GET /health` checks the API process. `GET /health/ready` verifies PostgreSQL
-and Redis connectivity. PostgreSQL data persists across `make down`.
+Browser tests use a local fake API and never call paid providers. The backend suite uses deterministic provider and storage doubles, with a separate PostgreSQL profile for database-specific behavior.
+
+## Repository layout
+
+```text
+backend/
+  app/api/          HTTP routes
+  app/domain/       frozen run contracts and domain types
+  app/providers/    fal provider adapters
+  app/services/     graph, run, mask, and mesh workflows
+  app/storage/      filesystem and S3-compatible ingestion
+  alembic/          database migrations
+  tests/            API, worker, provider, storage, and invariant tests
+frontend/
+  app/              Next.js routes
+  components/graph/ canvas and editing UI
+  lib/              API clients and browser-side codecs
+  tests/            unit and Playwright feature tests
+```
+
+Clai is a portfolio project intended for local, single-user use. It does not include authentication, authorization, billing controls, rate limiting, or hosted deployment configuration.
+
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Security reports should follow [SECURITY.md](SECURITY.md).
+
+## License
+
+Released under the [MIT License](LICENSE).

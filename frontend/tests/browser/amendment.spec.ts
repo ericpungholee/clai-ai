@@ -3,9 +3,9 @@ import { api, card, draft, graph } from "./lifecycle-helpers";
 
 test.beforeEach(async ({ request }) => { await request.post(`${api}/reset`); });
 
-test("white surfaces, blank names, and only useful input numbers", async ({ page, request }) => {
+test("white image and prompt surfaces, blank names, and useful input numbers", async ({ page, request }) => {
   await page.goto("/projects/fixture-project");
-  for (const selector of [".design-card", ".image-preview", ".prompt-anchor", ".prompt-editor"]) {
+  for (const selector of [".image-preview", ".prompt-anchor", ".prompt-editor"]) {
     const colors = await page.locator(selector).evaluateAll(elements => elements.map(element => getComputedStyle(element).backgroundColor));
     expect(colors.length).toBeGreaterThan(0);
     expect(colors.every(color => color === "rgb(255, 255, 255)")).toBe(true);

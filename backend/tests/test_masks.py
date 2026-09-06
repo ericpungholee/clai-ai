@@ -138,7 +138,7 @@ def test_composite_normalizes_output_and_preserves_outside_feather_band() -> Non
     pixels = np.zeros((20, 20), dtype=np.bool_)
     pixels[7:13, 7:13] = True
     mask = MaskSnapshot(encode_rle(pixels), 20, 20, "subject")
-    output, drift = composite_masked_output(
+    output = composite_masked_output(
         original=png((20, 20), "white"),
         generated=png((10, 40), "black"),
         mask=mask,
@@ -148,7 +148,6 @@ def test_composite_normalizes_output_and_preserves_outside_feather_band() -> Non
     assert result[8, 8, 0] == 0
     assert 0 < result[6, 8, 0] < result[5, 8, 0] < 255
     assert result[4, 8, 0] == result[0, 0, 0] == 255
-    assert drift == 0
     with pytest.raises(ValueError, match="dimensions"):
         composite_masked_output(
             original=png((10, 10), "white"),

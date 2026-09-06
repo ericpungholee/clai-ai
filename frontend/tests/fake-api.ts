@@ -65,7 +65,6 @@ function fixture(): GraphDocument {
     prompt_at_runtime: "A lamp",
     edit_depth: 0,
     branch_node_ids: ["target"],
-    masked_outside_change: null,
   };
   const result: GraphDocument = {
     nodes: [
@@ -236,7 +235,6 @@ createServer(async (request, response) => {
         seed: entry.seed,
         created_at: new Date().toISOString(),
         branch_node_ids: [],
-        masked_outside_change: node.mask ? 0 : null,
       };
       node.versions.push(version);
       node.active_version_id = version.id;
@@ -320,6 +318,8 @@ createServer(async (request, response) => {
       attempts: 0,
       error: null,
       version_id: null,
+      provider_elapsed_seconds: null,
+      total_elapsed_seconds: null,
       created_at: new Date().toISOString(),
       completed_at: null,
     };

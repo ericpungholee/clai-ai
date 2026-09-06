@@ -154,14 +154,13 @@ def test_graph_rehydrates_durable_run_and_locks_the_draft(
         prefix, json={"prompt": "New draft while running", "expected_revision": 0}
     )
     from app.services.run_execution import execute_run_job
-    from tests.test_graph import FakeDinoV2Scorer, FakeIngestor
+    from tests.test_graph import FakeIngestor
 
     execute_run_job(
         job_id=uuid.UUID(submitted["id"]),
         session_factory=TestingSessionLocal,
         provider=provider,
         ingestor=FakeIngestor(),
-        scorer=FakeDinoV2Scorer(),
     )
     graph = client.get(f"/api/projects/{project}/graph").json()
     assert graph["nodes"][0]["prompt"] == "First frozen instruction"

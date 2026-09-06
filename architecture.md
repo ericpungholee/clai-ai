@@ -272,6 +272,6 @@ There is no authentication, ownership/authorization model, billing, rate limitin
 
 Runtime imports, exported symbols, CSS selectors, dependency manifests, and file contents were audited. Application modules and dependencies remain in use; no identical nonempty production files were found. The unused empty Next.js configuration was removed. Database migrations and compatibility paths for retained images remain necessary.
 
-Local tests are not part of the git tree. `make test` runs frontend lint and type checking. `make lint` covers application Python and frontend lint.
+The tracked test suite covers API behavior, frozen run execution, branching and immutability, provider adapters, mask editing and compositing, artifact ingestion, mesh jobs, errors, retries, and PostgreSQL invariants. Playwright exercises the canvas workflows against a local fake API. Tests do not call paid providers. GitHub Actions runs the backend, frontend, production build, and browser checks for every pull request.
 
 `GraphWorkspace` still coordinates saves, polling, merges, and actions. All of those paths are active; splitting them is a separate behavioral refactor. Full-graph refreshes read retained history, so large projects may eventually benefit from pagination or incremental synchronization.

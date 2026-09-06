@@ -13,9 +13,6 @@ test("projects can be renamed, cancelled, and deleted", async ({ page }) => {
   await expect(tile.getByRole("heading", { name: "New lamp", exact: true })).toBeVisible();
   await page.reload();
   await expect(tile.getByRole("heading", { name: "New lamp", exact: true })).toBeVisible();
-  await page.screenshot({ path: "test-results/projects-desktop.png", fullPage: true });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: "test-results/projects-mobile.png", fullPage: true });
   await tile.getByRole("button", { name: /^Options for/ }).click();
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -32,11 +29,10 @@ test("canvas exports the original image and the saved GLB", async ({ page }) => 
   const imageDownload = page.waitForEvent("download");
   await source.getByRole("button", { name: "Export image", exact: true }).click();
   expect((await imageDownload).suggestedFilename()).toMatch(/\.svg$/);
-  await page.screenshot({ path: "test-results/workspace-styled.png" });
   await source.getByRole("button", { name: "3D", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Export 3D · GLB" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Export mesh only · GLB" })).toHaveCount(0);
   await page.getByRole("button", { name: "Generate 3D" }).click();
-  const exportModel = page.getByRole("button", { name: "Export 3D · GLB" });
+  const exportModel = page.getByRole("button", { name: "Export mesh only · GLB" });
   await expect(exportModel).toBeVisible();
   const meshDownload = page.waitForEvent("download");
   await exportModel.click();
@@ -56,7 +52,7 @@ test("failed image exports show an error and can be retried", async ({ page }) =
   await expect(source.getByRole("alert")).toHaveCount(0);
 });
 
-test("canvas project title supports save, cancel, and reload", async ({ page }) => {
+test("canvas project title autosaves on blur and reloads", async ({ page }) => {
   await page.goto("/projects/fixture-project");
   const rename = page.getByRole("button", { name: /^Rename project:/ });
   await rename.click();
@@ -64,8 +60,11 @@ test("canvas project title supports save, cancel, and reload", async ({ page }) 
   await page.keyboard.press("Escape");
   await expect(rename).not.toContainText("Cancelled title");
   await rename.click();
-  await page.getByRole("textbox", { name: "Project name", exact: true }).fill("Sky lamp");
-  await page.keyboard.press("Enter");
+  const nameField = page.getByRole("textbox", { name: "Project name", exact: true });
+  await nameField.fill("Sky lamp");
+  await expect(page.getByRole("button", { name: "Save project name" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Cancel rename" })).toHaveCount(0);
+  await nameField.blur();
   await expect(rename).toHaveText("Sky lamp");
   await page.reload();
   await expect(rename).toHaveText("Sky lamp");

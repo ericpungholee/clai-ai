@@ -51,10 +51,6 @@ def test_collapse_is_an_explicit_draft_and_deletion_never_erases_history(
     assert "feature 0" not in provider.requests[-1].prompt_at_runtime
     assert provider.requests[-1].edit_depth == 5
     graph = client.get(f"/api/projects/{project}/graph").json()
-    original = next(node for node in graph["nodes"] if node["id"] == node_id)[
-        "versions"
-    ][0]
-    assert original["masked_outside_change"] is None
     root_node = next(node for node in graph["nodes"] if node["id"] == root["id"])
     assert len(root_node["versions"][0]["branch_node_ids"]) == 1
     with TestingSessionLocal() as db:

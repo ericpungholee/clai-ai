@@ -119,9 +119,6 @@ test("saving an area keeps the draft empty and prevents references", async ({
   );
   await request.post(`${api}/finish-run`);
   await expect(
-    card(page, "target").getByText("Outside the selection: unchanged."),
-  ).toBeVisible();
-  await expect(
     card(page, "target").getByLabel("Saved area selection"),
   ).toBeVisible();
 });
