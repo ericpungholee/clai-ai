@@ -287,7 +287,7 @@ export function PromptEditor({
       candidate.title.toLowerCase().includes(query.toLowerCase()),
   );
   return (
-    <div className="prompt-anchor nodrag nowheel relative rounded-lg border border-neutral-200 bg-white focus-within:border-neutral-600">
+    <div className="prompt-anchor nodrag nowheel relative rounded-lg bg-white">
       {referenceHandle}
       <div
         ref={editor}

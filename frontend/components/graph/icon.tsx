@@ -44,6 +44,7 @@ const paths = {
       <circle cx="19" cy="12" r="1" />
     </>
   ),
+  arrowUp: <path d="M12 19V5m0 0-6 6m6-6 6 6" />,
 };
 
 export function Icon({ name }: { name: keyof typeof paths }) {

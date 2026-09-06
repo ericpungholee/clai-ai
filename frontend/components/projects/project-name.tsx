@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { changeProject } from "@/lib/projects";
 
 export function ProjectName({ id, name }: { id: string; name: string }) {
@@ -11,26 +11,32 @@ export function ProjectName({ id, name }: { id: string; name: string }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const skipBlur = useRef(false);
 
-  function cancel() {
-    if (busy) return;
+  function stopEditing(nextDraft = savedName) {
+    skipBlur.current = true;
     setEditing(false);
     setError(null);
-    setDraft(savedName);
+    setDraft(nextDraft);
   }
 
   async function save() {
     const nextName = draft.trim();
-    if (busy || !nextName) return;
-    if (nextName === savedName) { cancel(); return; }
+    if (busy) return;
+    if (!nextName || nextName === savedName) {
+      stopEditing(savedName);
+      return;
+    }
+    skipBlur.current = true;
     setBusy(true);
     setError(null);
     try {
       await changeProject(id, nextName);
       setSavedName(nextName);
-      setEditing(false);
+      stopEditing(nextName);
       router.refresh();
     } catch (error) {
+      skipBlur.current = false;
       setError(error instanceof Error ? error.message : "Could not rename project");
     } finally {
       setBusy(false);
@@ -40,30 +46,46 @@ export function ProjectName({ id, name }: { id: string; name: string }) {
   return (
     <div className="workspace-project-name">
       {editing ? (
-        <form
-          className="project-rename flex items-center gap-2"
-          onSubmit={(event) => { event.preventDefault(); void save(); }}
+        <input
+          aria-label="Project name"
+          autoFocus
+          className="workspace-title min-w-0 w-full text-sm font-semibold"
+          disabled={busy}
+          maxLength={120}
+          onBlur={() => {
+            if (skipBlur.current) {
+              skipBlur.current = false;
+              return;
+            }
+            void save();
+          }}
+          onChange={(event) => setDraft(event.target.value)}
+          onFocus={(event) => event.currentTarget.select()}
           onKeyDown={(event) => {
             event.stopPropagation();
-            if (event.key === "Escape") { event.preventDefault(); cancel(); }
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void save();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              stopEditing();
+            }
           }}
-        >
-          <input
-            aria-label="Project name"
-            autoFocus
-            onFocus={(event) => event.currentTarget.select()}
-            value={draft}
-            maxLength={120}
-            disabled={busy}
-            onChange={(event) => setDraft(event.target.value)}
-            className="min-w-0 w-full px-2 py-1 text-sm"
-          />
-          <button type="submit" aria-label="Save project name" title="Save" disabled={busy || !draft.trim()}>✓</button>
-          <button type="button" aria-label="Cancel rename" title="Cancel" disabled={busy} onClick={cancel}>×</button>
-        </form>
+          value={draft}
+        />
       ) : (
         <h1 className="truncate text-sm font-semibold text-foreground">
-          <button className="workspace-title" title="Rename project" aria-label={`Rename project: ${savedName}`} onClick={() => { setDraft(savedName); setEditing(true); }}>
+          <button
+            aria-label={`Rename project: ${savedName}`}
+            className="workspace-title"
+            onClick={() => {
+              skipBlur.current = false;
+              setDraft(savedName);
+              setEditing(true);
+            }}
+            title="Rename project"
+          >
             {savedName}
           </button>
         </h1>

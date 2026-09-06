@@ -12,7 +12,7 @@ import { PromptEditor } from "./prompt-editor";
 import { VersionStrip } from "./version-strip";
 import { RunProgress } from "./run-progress";
 import { SaveStatus } from "./save-status";
-import { IconButton } from "./icon";
+import { Icon, IconButton } from "./icon";
 import { OverflowMenu } from "./overflow-menu";
 import { MaskOutline } from "./mask-outline";
 
@@ -262,12 +262,13 @@ export const DesignNode = memo(function DesignNode({
             <RunProgress run={data.run} />
           ) : !result ? (
             <button
-              className="nodrag rounded bg-neutral-900 px-3 py-1 text-xs font-semibold text-white disabled:bg-neutral-300"
+              className="run-button nodrag text-white disabled:bg-neutral-300"
               disabled={!!blocked}
-              title={blocked ?? "Run"}
+              aria-label={failed ? "Retry" : "Run"}
+              title={blocked ?? (failed ? "Retry" : "Run")}
               onClick={run}
             >
-              {failed ? "Retry" : "Run"}
+              <Icon name="arrowUp" />
             </button>
           ) : null
         }
@@ -275,7 +276,7 @@ export const DesignNode = memo(function DesignNode({
       {result ? (
         <div className="nodrag flex flex-wrap gap-2">
           <button
-            className="w-full rounded bg-neutral-900 px-3 py-2 text-xs font-semibold text-white"
+            className="w-full rounded bg-neutral-900 px-3 py-2 text-xs font-bold text-white"
             onClick={() => actions.branchVersion(id, activeVersion.id)}
           >
             New node

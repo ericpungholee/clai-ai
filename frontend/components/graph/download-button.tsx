@@ -40,7 +40,7 @@ export function DownloadButton({ url, name, label = "Export image", extension }:
   }
   return (
     <span className="download-control nodrag nowheel">
-      <button type="button" className="export-button" disabled={busy} onClick={() => void download()}>
+      <button type="button" className="export-button font-bold" disabled={busy} onClick={() => void download()}>
         {busy ? "Exporting…" : label}
       </button>
       {error ? <span role="alert" className="download-error">{error}</span> : null}

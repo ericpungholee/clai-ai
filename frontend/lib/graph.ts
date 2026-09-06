@@ -1,4 +1,5 @@
 import type { Edge, Node } from "@xyflow/react";
+import { apiRequest, browserApiUrl, serverApiUrl } from "./api";
 
 export type Op =
   | "generate"
@@ -56,7 +57,6 @@ export type PersistedGraphNode = {
 export type PromptPart =
   | { type: "text"; text: string }
   | { type: "connect"; edge_id: string; source_node_id: string };
-export type RunPreview = { op: Op };
 
 export type ConnectPreview = {
   versionId: string | null;
@@ -157,14 +157,6 @@ export type RunJob = {
   completed_at: string | null;
 };
 
-const serverApiUrl =
-  process.env.API_INTERNAL_URL ??
-  process.env.NEXT_PUBLIC_API_URL ??
-  "http://localhost:8000";
-
-const browserApiUrl =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
 export async function saveMask(
   projectId: string,
   nodeId: string,
@@ -262,7 +254,6 @@ export async function duplicateDesignNode(
   projectId: string,
   nodeId: string,
   position: { x: number; y: number },
-  freshSeed = false,
 ): Promise<PersistedGraphNode> {
   return apiRequest(
     `${browserApiUrl}/api/projects/${projectId}/nodes/${nodeId}/duplicate`,
@@ -272,7 +263,6 @@ export async function duplicateDesignNode(
       body: JSON.stringify({
         id: crypto.randomUUID(),
         position,
-        fresh_seed: freshSeed,
       }),
     },
   );
@@ -356,16 +346,6 @@ export async function submitRun(
         idempotency_key: idempotencyKey,
       }),
     },
-  );
-}
-
-export async function getRunPreview(
-  projectId: string,
-  nodeId: string,
-): Promise<RunPreview> {
-  return apiRequest(
-    `${browserApiUrl}/api/projects/${projectId}/nodes/${nodeId}/run-preview`,
-    { cache: "no-store" },
   );
 }
 
@@ -573,33 +553,6 @@ export function runBlockingReason(data: DesignNodeData): string | null {
   if (data.prompt.length > 8000) return "Prompt exceeds 8,000 characters.";
   if (!data.prompt.trim()) return "Enter a prompt.";
   return null;
-}
-
-async function apiRequest<T>(input: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, init);
-  if (!response.ok) {
-    const body: unknown = await response.json().catch(() => null);
-    const value =
-      body && typeof body === "object" && "detail" in body ? body.detail : null;
-    const detail =
-      typeof value === "string"
-        ? value
-        : Array.isArray(value)
-          ? value
-              .map((item: unknown) =>
-                item &&
-                typeof item === "object" &&
-                "msg" in item &&
-                typeof item.msg === "string"
-                  ? item.msg
-                  : "Invalid field",
-              )
-              .join(". ")
-          : "Request failed";
-    throw new Error(detail);
-  }
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
 }
 
 export function nodeLabel(node: { title: string; prompt: string }): string {

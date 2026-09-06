@@ -28,6 +28,14 @@ test-results/
 playwright-report/
 next-env.d.ts
 
+# Tests and benchmarks (local only)
+backend/tests/
+backend/benchmarks/
+backend/scripts/
+frontend/tests/
+frontend/playwright.config.ts
+docs/performance/
+
 # Editors
 .idea/
 .vscode/

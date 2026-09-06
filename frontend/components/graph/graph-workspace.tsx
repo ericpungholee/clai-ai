@@ -58,6 +58,7 @@ import { HelpPanel } from "./help-panel";
 import { MaskEditor } from "./mask-editor";
 import { ImageViewer } from "./image-viewer";
 import { MeshViewer } from "./mesh-viewer";
+import type { MeshDecal } from "@/lib/mesh-decals";
 import { CollapseDialog } from "./collapse-dialog";
 import { DesignNodeActionsContext } from "./design-node-actions";
 import { SaveStatus, type SaveState } from "./save-status";
@@ -145,6 +146,10 @@ export function GraphWorkspace({
   const [maskNodeId, setMaskNodeId] = useState<string | null>(null);
   const [viewedVersions, setViewedVersions] = useState<Version[]>([]);
   const [meshVersion, setMeshVersion] = useState<Version | null>(null);
+  // Viewer-only state. Never included in node patches, masks, runs or version data.
+  const [meshDecals, setMeshDecals] = useState<Record<string, MeshDecal | null>>(
+    {},
+  );
   const [collapseVersionId, setCollapseVersionId] = useState<string | null>(
     null,
   );
@@ -654,24 +659,6 @@ export function GraphWorkspace({
     [scheduleNodePatch],
   );
 
-  const updateWhiteBackground = useCallback(
-    (nodeId: string, enabled: boolean) => {
-      const node = nodesRef.current.find(
-        (candidate) => candidate.id === nodeId,
-      );
-      if (
-        !node ||
-        node.data.versions.length ||
-        node.data.run.status === "running"
-      )
-        return;
-      const settings = { ...node.data.settings, whiteBackground: enabled };
-      updateNodeData(nodeId, { settings });
-      scheduleNodePatch(nodeId, { settings });
-    },
-    [scheduleNodePatch, updateNodeData],
-  );
-
   const disconnectSubject = useCallback(
     async (nodeId: string, approved = false) => {
       const node = nodesRef.current.find((node) => node.id === nodeId);
@@ -1016,7 +1003,6 @@ export function GraphWorkspace({
   const actions = useMemo(
     () => ({
       updateTitle,
-      updateWhiteBackground,
       selectVersion,
       branchVersion,
       runNode,
@@ -1074,7 +1060,6 @@ export function GraphWorkspace({
       runNode,
       selectVersion,
       updateTitle,
-      updateWhiteBackground,
       updateDocument,
       projectId,
       updateNodeData,
@@ -1169,6 +1154,10 @@ export function GraphWorkspace({
             key={meshVersion.id}
             projectId={projectId}
             version={meshVersion}
+            decals={meshDecals}
+            onDecalChange={(attemptId, decal) =>
+              setMeshDecals((current) => ({ ...current, [attemptId]: decal }))
+            }
             onClose={() => setMeshVersion(null)}
             onPreview={(versionId, url) => {
               const node = nodesRef.current.find((node) =>
@@ -1435,7 +1424,7 @@ export function GraphWorkspace({
                   .filter((node) => node.selected)
                   .every((node) => node.data.activeVersionId) ? (
                   <button
-                    className="mt-2 rounded border bg-white px-3 py-2 text-sm"
+                    className="mt-2 rounded border bg-white px-3 py-2 text-sm font-bold"
                     onClick={() =>
                       actions.viewVersions(
                         nodes
@@ -1461,12 +1450,9 @@ export function GraphWorkspace({
             </Panel>
             {nodes.length === 0 ? (
               <Panel position="top-center">
-                <div className="mt-20 max-w-sm rounded-xl border bg-white p-5 text-center shadow-sm">
-                  <p>1. Describe a design.</p>
-                  <p>2. Run to generate it.</p>
-                  <p>3. Add a connected node to change it.</p>
+                <div className="mt-20">
                   <button
-                    className="mt-3 rounded bg-neutral-900 px-4 py-2 text-sm text-white"
+                    className="rounded bg-neutral-900 px-4 py-2 text-sm font-bold text-white"
                     onClick={() => void addNode()}
                   >
                     Add node

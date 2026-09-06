@@ -3,30 +3,19 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-const apiUrl =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { createProject } from "@/lib/projects";
 
 export function NewProjectButton() {
   const router = useRouter();
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function createProject() {
+  async function handleCreate() {
     setIsCreating(true);
     setError(null);
 
     try {
-      const response = await fetch(`${apiUrl}/api/projects`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Untitled Project" }),
-      });
-
-      if (!response.ok) {
-        throw new Error();
-      }
-
-      const project: { id: string } = await response.json();
+      const project = await createProject();
       router.push(`/projects/${project.id}`);
     } catch {
       setError("Could not create project");
@@ -47,7 +36,7 @@ export function NewProjectButton() {
         title="New Project"
         aria-busy={isCreating}
         type="button"
-        onClick={createProject}
+        onClick={handleCreate}
         disabled={isCreating}
       >
         <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">

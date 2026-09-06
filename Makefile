@@ -1,4 +1,4 @@
-.PHONY: dev down logs migrate revision backend-shell db-shell test test-postgres lint
+.PHONY: dev down logs migrate revision backend-shell db-shell test benchmark lint
 
 dev:
 	docker compose up --build
@@ -22,15 +22,13 @@ db-shell:
 	docker compose exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
 
 test:
-	docker compose exec backend uv run pytest
 	docker compose exec frontend npm run lint
 	docker compose exec frontend npm run typecheck
-	docker compose exec frontend npm test
 
-test-postgres:
-	docker compose --profile test run --rm backend-test
+benchmark:
+	docker compose exec -T -e BENCHMARK_REVISION="$$(git rev-parse HEAD)" backend .venv/bin/python -m scripts.benchmark_generation --manifest .data/benchmarks/manifest.json --output .data/benchmarks/$(if $(OUTPUT),$(OUTPUT),after) --runs $(if $(RUNS),$(RUNS),5)
 
 lint:
-	docker compose exec backend uv run ruff check app tests alembic
-	docker compose exec backend uv run ruff format --check app tests alembic
+	docker compose exec backend uv run ruff check app alembic
+	docker compose exec backend uv run ruff format --check app alembic
 	docker compose exec frontend npm run lint

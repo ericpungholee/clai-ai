@@ -1,3 +1,5 @@
+import { apiRequest, browserApiUrl } from "./api";
+
 type MeshIdentity = {
   version_id: string;
   attempt_id: string;
@@ -17,15 +19,13 @@ export type MeshData = MeshIdentity &
     | { status: "failed"; artifact_url: null; error: string }
   );
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
 export async function requestMesh(
   projectId: string,
   versionId: string,
   create?: { texture: "no" | "standard"; attempt_id: string },
 ): Promise<MeshData | null> {
-  const response = await fetch(
-    `${apiUrl}/api/projects/${projectId}/versions/${versionId}/mesh`,
+  return apiRequest(
+    `${browserApiUrl}/api/projects/${projectId}/versions/${versionId}/mesh`,
     create
       ? {
           method: "POST",
@@ -33,14 +33,6 @@ export async function requestMesh(
           body: JSON.stringify(create),
         }
       : { cache: "no-store" },
+    "The 3D view is unavailable. Your image is unchanged.",
   );
-  if (!response.ok) {
-    const body = await response.json();
-    throw new Error(
-      typeof body.detail === "string"
-        ? body.detail
-        : "The 3D view is unavailable. Your image is unchanged.",
-    );
-  }
-  return response.json();
 }

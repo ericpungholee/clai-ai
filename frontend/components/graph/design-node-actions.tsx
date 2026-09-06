@@ -5,7 +5,6 @@ import type { PromptPart } from "@/lib/graph";
 
 type DesignNodeActions = {
   updateTitle: (nodeId: string, title: string) => void;
-  updateWhiteBackground: (nodeId: string, enabled: boolean) => void;
   selectVersion: (nodeId: string, versionId: string) => void;
   branchVersion: (nodeId: string, versionId: string) => void;
   collapseVersion: (versionId: string) => void;
