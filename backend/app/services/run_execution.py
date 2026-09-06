@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.domain.runs import FrozenRunRequest
 from app.models.graph import GraphNode, RunJob, Version, VersionMetric
 from app.models.project import Project
-from app.providers.base import ImageProvider
+from app.providers.base import ImageProvider, ProviderJob
 from app.services.frozen_request_codec import decode_frozen_request
 from app.storage.artifacts import ArtifactIngestor, StoredArtifact
 
@@ -115,12 +115,11 @@ def _claim_job(
 
 
 def _record_provider_job(
-    *, job_id: uuid.UUID, provider_job: object, session_factory: sessionmaker[Session]
+    *,
+    job_id: uuid.UUID,
+    provider_job: ProviderJob,
+    session_factory: sessionmaker[Session],
 ) -> None:
-    from app.providers.base import ProviderJob
-
-    if not isinstance(provider_job, ProviderJob):
-        raise RunExecutionError("Provider returned an invalid job")
     with session_factory.begin() as db:
         job = _lock_job(db, job_id)
         job.provider = provider_job.provider
@@ -147,16 +146,12 @@ def _commit_version(
     *,
     job_id: uuid.UUID,
     request: FrozenRunRequest,
-    provider_job: object,
+    provider_job: ProviderJob,
     artifact: StoredArtifact,
     response_metadata: dict[str, object],
     metric: ChangeMagnitudeResult,
     session_factory: sessionmaker[Session],
 ) -> uuid.UUID:
-    from app.providers.base import ProviderJob
-
-    if not isinstance(provider_job, ProviderJob):
-        raise RunExecutionError("Provider returned an invalid job")
     with session_factory.begin() as db:
         project_id = db.scalar(select(RunJob.project_id).where(RunJob.id == job_id))
         project = db.scalar(
@@ -171,6 +166,11 @@ def _commit_version(
         )
         if node is None:
             raise RunExecutionError("Run target no longer exists")
+
+        if db.scalar(select(Version.id).where(Version.node_id == node.id).limit(1)):
+            raise RunExecutionError(
+                "This node already has an image. Create a new node."
+            )
 
         version = Version(
             id=uuid.uuid4(),
@@ -200,10 +200,6 @@ def _commit_version(
         )
         db.add(version)
         db.flush()
-        if node.title == "Untitled concept":
-            # Titles are a visible shorthand, never additional generation context.
-            text = request.user_prompt.strip()
-            node.title = " ".join(text.split()[:8])[:120] or "Untitled concept"
         node.active_version_id = version.id
         if project is not None:
             project.thumbnail_url = artifact.artifact_url

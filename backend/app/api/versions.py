@@ -1,21 +1,16 @@
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.graph import get_project_or_404
 from app.core.database import get_db
-from app.models.graph import GraphNode, RunJob, Version, VersionVisibility
-from app.services.prompt_builder import PRESERVATION_PREAMBLE
+from app.models.graph import GraphNode, RunJob, Version
 
 router = APIRouter(prefix="/api/projects/{project_id}/versions", tags=["versions"])
-
-
-class VisibilityUpdate(BaseModel):
-    hidden: bool
 
 
 class CollapseReady(BaseModel):
@@ -39,39 +34,8 @@ def project_version(
         .where(Version.id == version_id, GraphNode.project_id == project_id)
     )
     if version is None:
-        raise HTTPException(404, "Version not found")
+        raise HTTPException(404, "Image not found")
     return version
-
-
-@router.put("/{version_id}/visibility", status_code=204)
-def update_visibility(
-    project_id: uuid.UUID,
-    version_id: uuid.UUID,
-    data: VisibilityUpdate,
-    db: Session = Depends(get_db),
-) -> Response:
-    get_project_or_404(project_id, db)
-    version = project_version(project_id, version_id, db)
-    visibility = db.get(VersionVisibility, version_id)
-    if data.hidden and visibility is None:
-        db.add(VersionVisibility(version_id=version_id))
-    elif not data.hidden and visibility is not None:
-        db.delete(visibility)
-    db.flush()
-    node = db.get(GraphNode, version.node_id)
-    if data.hidden and node.active_version_id == version_id:
-        node.active_version_id = db.scalar(
-            select(Version.id)
-            .where(
-                Version.node_id == node.id,
-                ~Version.id.in_(select(VersionVisibility.version_id)),
-            )
-            .order_by(Version.created_at.desc(), Version.id.desc())
-            .limit(1)
-        )
-        node.revision += 1
-    db.commit()
-    return Response(status_code=204)
 
 
 @router.get(
@@ -93,15 +57,22 @@ def preview_collapse(
         if current.op != "edit_instruct":
             return CollapseUnavailable(
                 reason=(
-                    "This chain includes a mask or connect reference. Its regions "
+                    "This chain includes an area selection or reference. Its regions "
                     "and image positions cannot be safely reapplied to the root. "
-                    "Branch from an earlier version instead."
+                    "Continue editing an earlier image instead."
                 )
             )
         job = db.get(RunJob, current.run_job_id)
         instruction = job.frozen_request.get("user_prompt") if job else None
         if not isinstance(instruction, str) or not instruction.strip():
-            prefix, suffix = PRESERVATION_PREAMBLE.split("{resolved_user_prompt}")
+            # Pre-document runs lack user_prompt; parse only their exact legacy
+            # envelope, never reinterpret or rewrite the immutable stored text.
+            prefix = (
+                "Preserve exactly every unmentioned attribute, including geometry,\n"
+                "proportions, silhouette, camera angle, framing, lighting direction,\n"
+                "and background.\nChange only: "
+            )
+            suffix = "\nDo not restyle or reinterpret any other element."
             runtime = current.prompt_at_runtime
             if not runtime.startswith(prefix) or not runtime.endswith(suffix):
                 return CollapseUnavailable(
@@ -115,7 +86,7 @@ def preview_collapse(
         subject_id = current.input_snapshot.get("subject_version_id")
         if not isinstance(subject_id, str):
             return CollapseUnavailable(
-                reason="This historical edit has no recorded subject."
+                reason="This historical edit has no recorded input image."
             )
         current = project_version(project_id, uuid.UUID(subject_id), db)
     if len(instructions) < 2:
@@ -132,7 +103,7 @@ def preview_collapse(
         return CollapseUnavailable(
             reason=(
                 "The accumulated instructions exceed the prompt limit. "
-                "Branch from an earlier version instead."
+                "Continue editing an earlier image instead."
             )
         )
     return CollapseReady(

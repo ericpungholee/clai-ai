@@ -9,7 +9,7 @@ def resolve_op(*, has_subject: bool, has_mask: bool, connect_count: int) -> Op:
     if connect_count < 0 or connect_count > 2:
         raise OperationRoutingError("A run accepts between zero and two connects")
     if has_mask and not has_subject:
-        raise OperationRoutingError("A mask requires a resolved subject version")
+        raise OperationRoutingError("Select an input image before selecting an area.")
 
     match has_subject, has_mask, connect_count > 0:
         case False, False, False:

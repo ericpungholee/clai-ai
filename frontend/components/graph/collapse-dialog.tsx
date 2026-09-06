@@ -44,12 +44,12 @@ export function CollapseDialog({
     >
       <header className="flex justify-between gap-4">
         <h2 className="text-lg font-semibold">Collapse edit chain</h2>
-        <button onClick={onClose}>Close · Esc</button>
+        <button onClick={onClose}>Close</button>
       </header>
       <p className="my-3 text-sm text-neutral-600">
-        A new branch applies these visible instructions to the original subject
-        in one edit. The old chain stays intact; compare both when it finishes.
-        This is a new paid image run.
+        A new node applies these instructions to the original input image in one
+        edit. The old chain stays intact; compare both when it finishes. This is
+        a new paid image run.
       </p>
       {preview?.status === "ready" ? (
         <>

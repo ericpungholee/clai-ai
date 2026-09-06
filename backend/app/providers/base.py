@@ -5,14 +5,6 @@ from app.domain.runs import FrozenRunRequest
 
 
 @dataclass(frozen=True)
-class ProviderCapabilities:
-    mask: bool
-    references: int
-    seed: bool
-    max_resolution: tuple[int, int]
-
-
-@dataclass(frozen=True)
 class ArtifactBytes:
     content: bytes
     content_type: str
@@ -56,7 +48,6 @@ class ProviderContractError(ValueError):
 
 class ImageProvider(Protocol):
     id: str
-    capabilities: ProviderCapabilities
 
     def execute(self, request: FrozenRunRequest) -> ProviderJob: ...
 

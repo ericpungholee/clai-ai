@@ -1,25 +1,17 @@
 export type SaveState = "saved" | "saving" | "failed";
-
-type SaveStatusProps = {
-  state: SaveState;
-};
-
-const labels: Record<SaveState, string> = {
+export const saveLabels: Record<SaveState, string> = {
   saved: "Saved",
   saving: "Saving…",
   failed: "Save failed",
 };
-
-export function SaveStatus({ state }: SaveStatusProps) {
+export function SaveStatus({ state }: { state: SaveState }) {
   return (
     <span
+      aria-label={saveLabels[state]}
+      title={saveLabels[state]}
       aria-live="polite"
-      className={`justify-self-end text-xs ${
-        state === "failed" ? "text-red-700" : "text-muted"
-      }`}
       role="status"
-    >
-      {labels[state]}
-    </span>
+      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full justify-self-end ${state === "failed" ? "bg-red-600" : state === "saving" ? "bg-amber-500" : "bg-neutral-400"}`}
+    />
   );
 }

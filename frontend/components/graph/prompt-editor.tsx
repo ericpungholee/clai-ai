@@ -1,7 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import type { ConnectPreview, PromptPart } from "@/lib/graph";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
+import {
+  referenceNumber,
+  type ConnectPreview,
+  type PromptPart,
+} from "@/lib/graph";
 
 type Candidate = { id: string; title: string };
 
@@ -37,20 +47,64 @@ function readDocument(root: HTMLElement): PromptPart[] {
   return parts;
 }
 
+function animateDeparture(chip: HTMLElement) {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const box = chip.getBoundingClientRect();
+  const copy = chip.cloneNode(true) as HTMLElement;
+  copy.removeAttribute("data-edge-id");
+  copy.removeAttribute("tabindex");
+  copy.setAttribute("aria-hidden", "true");
+  Object.assign(copy.style, {
+    position: "fixed",
+    left: `${box.left}px`,
+    top: `${box.top}px`,
+    width: `${box.width}px`,
+    height: `${box.height}px`,
+    pointerEvents: "none",
+    zIndex: "100",
+  });
+  window.document.body.append(copy);
+  const animation = copy.animate(
+    [
+      { opacity: 0.7, transform: "scale(1)" },
+      { opacity: 0, transform: "scale(0.85)" },
+    ],
+    { duration: 150 },
+  );
+  void animation.finished.then(
+    () => copy.remove(),
+    () => copy.remove(),
+  );
+}
+
 export function PromptEditor({
+  readOnly = false,
+  hasMask = false,
+  onRemoveMask,
   document,
   connects,
   candidates,
   placeholder,
+  hasSubject,
+  highlightedWireId,
+  footer,
+  referenceHandle,
   onChange,
   onHover,
   onJump,
   onRun,
 }: {
+  readOnly?: boolean;
+  hasMask?: boolean;
+  onRemoveMask?: () => void;
   document: PromptPart[];
   connects: ConnectPreview[];
   candidates: Candidate[];
   placeholder: string;
+  hasSubject: boolean;
+  highlightedWireId: string | null;
+  footer: ReactNode;
+  referenceHandle: ReactNode;
   onChange: (document: PromptPart[]) => void;
   onHover: (id: string | null) => void;
   onJump: (id: string) => void;
@@ -65,6 +119,15 @@ export function PromptEditor({
     const root = editor.current!;
     const serialized = JSON.stringify(document);
     if (serialized !== lastDocument.current) {
+      root.querySelectorAll<HTMLElement>("[data-edge-id]").forEach((chip) => {
+        if (
+          !document.some(
+            (part) =>
+              part.type === "connect" && part.edge_id === chip.dataset.edgeId,
+          )
+        )
+          animateDeparture(chip);
+      });
       root.replaceChildren(
         ...document.map((part) => {
           if (part.type === "text")
@@ -82,19 +145,68 @@ export function PromptEditor({
       const ref = connects.find(
         (value) => value.edgeId === chip.dataset.edgeId,
       );
-      chip.textContent = `@${ref?.title ?? "Deleted concept"}`;
-      chip.className = `mx-0.5 inline rounded px-1 py-0.5 text-xs ${ref?.state === "ready" ? "bg-purple-100 text-purple-900" : "bg-red-100 text-red-800"}`;
+      const number = referenceNumber(
+        connects.findIndex((value) => value.edgeId === chip.dataset.edgeId),
+        hasSubject,
+      );
+      const label = ref?.title ?? "Deleted reference";
+      const badge = window.document.createElement("span");
+      badge.className = "wire-number";
+      badge.textContent = String(number);
+      const name = window.document.createElement("span");
+      name.textContent = `@${label.length > 18 ? `${label.slice(0, 18)}…` : label}`;
+      chip.replaceChildren(
+        ...(connects.length + Number(hasSubject) > 1 ? [badge, name] : [name]),
+      );
+      chip.className = `prompt-chip ${ref?.state === "deleted" ? "broken" : ""}`;
+      chip.dataset.highlighted = String(
+        highlightedWireId === chip.dataset.edgeId,
+      );
+      chip.tabIndex = 0;
+      chip.setAttribute("role", "button");
+      chip.setAttribute("aria-label", `Image ${number}: ${label}`);
       chip.title =
         ref?.state === "deleted"
-          ? "Source deleted — remove or replace this chip"
+          ? "Source deleted — remove or replace this reference."
           : ref?.state === "empty"
-            ? "Run the source node first"
+            ? "Reference has no image — run its source first."
             : "Click to find on canvas";
-      chip.onmouseenter = () => onHover(chip.dataset.sourceId!);
+      chip.onmouseenter = () => onHover(chip.dataset.edgeId!);
+      chip.onfocus = () => onHover(chip.dataset.edgeId!);
+      chip.onblur = () => onHover(null);
       chip.onmouseleave = () => onHover(null);
       chip.onclick = () => onJump(chip.dataset.sourceId!);
+      chip.onkeydown = (event) => {
+        if (event.key === "Enter" && !event.metaKey && !event.ctrlKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          onJump(chip.dataset.sourceId!);
+        }
+        if (
+          !readOnly &&
+          (event.key === "Backspace" || event.key === "Delete")
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          animateDeparture(chip);
+          chip.remove();
+          editor.current?.focus();
+          const value = readDocument(root);
+          lastDocument.current = JSON.stringify(value);
+          onChange(value);
+        }
+      };
     });
-  }, [document, connects, onHover, onJump]);
+  }, [
+    readOnly,
+    document,
+    connects,
+    hasSubject,
+    highlightedWireId,
+    onHover,
+    onJump,
+    onChange,
+  ]);
 
   function emit() {
     const value = readDocument(editor.current!);
@@ -110,7 +222,7 @@ export function PromptEditor({
   }
   function insert(candidate: Candidate) {
     const range = insertion.current;
-    if (!range) return;
+    if (!range || hasMask || readOnly) return;
     const chip = window.document.createElement("span");
     chip.contentEditable = "false";
     chip.dataset.edgeId = crypto.randomUUID();
@@ -131,6 +243,7 @@ export function PromptEditor({
   }
   function key(event: KeyboardEvent<HTMLDivElement>) {
     event.stopPropagation();
+    if (readOnly) return;
     if (event.key === "@") {
       event.preventDefault();
       openMenu();
@@ -163,6 +276,7 @@ export function PromptEditor({
         : anchor.childNodes[backwards ? offset - 1 : offset];
     if (neighbor instanceof HTMLElement && neighbor.dataset.edgeId) {
       event.preventDefault();
+      animateDeparture(neighbor);
       neighbor.remove();
       emit();
     }
@@ -173,20 +287,23 @@ export function PromptEditor({
       candidate.title.toLowerCase().includes(query.toLowerCase()),
   );
   return (
-    <div className="nodrag nowheel relative mt-3">
+    <div className="prompt-anchor nodrag nowheel relative rounded-lg border border-neutral-200 bg-white focus-within:border-neutral-600">
+      {referenceHandle}
       <div
         ref={editor}
         role="textbox"
         aria-label="Design prompt"
         aria-multiline
-        contentEditable
+        contentEditable={!readOnly}
+        aria-readonly={readOnly}
         suppressContentEditableWarning
         data-placeholder={placeholder}
-        className="prompt-editor max-h-52 min-h-20 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-sm leading-6 outline-none focus:border-sky-400"
+        className="prompt-editor max-h-32 min-h-16 overflow-y-auto whitespace-pre-wrap break-words px-2.5 py-2 text-sm leading-6 outline-none"
         onInput={emit}
         onKeyDown={key}
         onPaste={(event) => {
           event.preventDefault();
+          if (readOnly) return;
           window.document.execCommand(
             "insertText",
             false,
@@ -195,16 +312,37 @@ export function PromptEditor({
           emit();
         }}
       />
+      {document.reduce(
+        (sum, part) => sum + (part.type === "text" ? part.text.length : 0),
+        0,
+      ) >= 7500 ? (
+        <p className="px-2 text-xs">
+          {document
+            .reduce(
+              (sum, part) =>
+                sum + (part.type === "text" ? part.text.length : 0),
+              0,
+            )
+            .toLocaleString("en-US")}{" "}
+          / 8,000
+        </p>
+      ) : null}
+      {footer ? (
+        <div className="flex h-9 items-center justify-end gap-2 px-2 pb-1">
+          {footer}
+        </div>
+      ) : null}
       {menu ? (
         <div
           className="absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border bg-white p-2 shadow-xl"
           role="dialog"
-          aria-label="Connect a concept"
+          aria-label="Add a reference"
         >
           <input
+            disabled={hasMask}
             autoFocus
-            aria-label="Find a concept"
-            placeholder="Find a concept"
+            aria-label="Find a node"
+            placeholder="Find a node"
             className="w-full border-b p-1 text-xs outline-none"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -218,16 +356,30 @@ export function PromptEditor({
                 insert(available[0]);
             }}
           />
-          {connects.length >= 2 ? (
+          {hasMask ? (
             <p className="p-2 text-xs">
-              Two connect chips maximum. Remove one first.
+              Area selections can&apos;t be combined with references. Remove the
+              selection first.
+              <button
+                className="block underline"
+                onClick={() => {
+                  onRemoveMask?.();
+                  setMenu(false);
+                }}
+              >
+                Remove selection
+              </button>
+            </p>
+          ) : connects.length >= 2 ? (
+            <p className="p-2 text-xs">
+              Two references maximum. Remove one first.
             </p>
           ) : (
             available.map((candidate) => (
               <button
                 key={candidate.id}
                 type="button"
-                className="block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-purple-50"
+                className="block w-full truncate rounded px-2 py-1 text-left text-xs hover:shadow-sm"
                 onClick={() => insert(candidate)}
               >
                 {candidate.title}

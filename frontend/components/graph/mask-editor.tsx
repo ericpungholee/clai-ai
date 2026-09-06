@@ -16,6 +16,7 @@ export function MaskEditor({
   projectId,
   nodeId,
   subject,
+  hasReferences = false,
   initialMask,
   onClose,
   onSave,
@@ -24,6 +25,7 @@ export function MaskEditor({
   nodeId: string;
   subject: SubjectPreview;
   initialMask: MaskData | null;
+  hasReferences?: boolean;
   onClose: () => void;
   onSave: (mask: MaskData | null) => void;
 }) {
@@ -108,7 +110,7 @@ export function MaskEditor({
     };
   }
   async function select(points: { x: number; y: number; label: 0 | 1 }[]) {
-    if (busy) return;
+    if (busy || text.length > 240) return;
     setBusy(true);
     setError(null);
     try {
@@ -120,7 +122,7 @@ export function MaskEditor({
         return;
       }
       if (mask.width !== dimensions.width || mask.height !== dimensions.height)
-        throw new Error("Selection dimensions do not match this subject");
+        throw new Error("Selection dimensions do not match this input image");
       remember();
       canvas
         .current!.getContext("2d")!
@@ -172,14 +174,19 @@ export function MaskEditor({
       context.stroke();
     }
     context.globalCompositeOperation = "source-over";
+    setCount(currentMask().count);
   }
   async function save(clear = false) {
     setBusy(true);
     setError(null);
     try {
+      if (!clear && hasReferences)
+        throw new Error(
+          "This node has references. Remove them to save an area selection.",
+        );
       const encoded = currentMask();
       if (!clear && !encoded.count)
-        throw new Error("Select an area first, or choose Remove mask.");
+        throw new Error("Select an area first, or choose Remove selection.");
       const mask = clear
         ? null
         : {
@@ -190,7 +197,11 @@ export function MaskEditor({
       await saveMask(projectId, nodeId, mask);
       onSave(mask);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not save mask");
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Could not save area selection",
+      );
     } finally {
       setBusy(false);
     }
@@ -207,16 +218,17 @@ export function MaskEditor({
     >
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-semibold">Edit an area of {subject.nodeTitle}</h2>
+          <h2 className="font-semibold">
+            Select an area of {subject.nodeTitle}
+          </h2>
           <p className="text-xs text-neutral-500">
-            Orange areas change. The surrounding image is preserved with a 3px
-            blended seam.
+            Orange areas change.
           </p>
         </div>
         <button
           disabled={busy}
           onClick={onClose}
-          aria-label="Close mask editor"
+          aria-label="Close area selection editor"
         >
           ✕
         </button>
@@ -293,7 +305,7 @@ export function MaskEditor({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={subject.artifactUrl}
-          alt="Pinned subject to mask"
+          alt="Input image to select"
           draggable={false}
           className="block max-h-[62vh] max-w-full object-contain"
           onLoad={(event) => {
@@ -303,7 +315,7 @@ export function MaskEditor({
               height: image.naturalHeight,
             });
           }}
-          onError={() => setError("The subject image could not be loaded.")}
+          onError={() => setError("The input image could not be loaded.")}
         />
         <canvas
           ref={canvas}
@@ -377,21 +389,25 @@ export function MaskEditor({
           onChange={(event) => setText(event.target.value)}
         />
         <button
-          disabled={busy || !text.trim()}
+          disabled={busy || !text.trim() || text.length > 240}
           className="rounded-lg border px-3 text-sm"
         >
-          {busy ? "Working…" : "Select · ~$0.005"}
+          {busy ? "Working…" : "Select"}
         </button>
+        {text.length >= 200 ? (
+          <span className="text-xs">{text.length} / 240</span>
+        ) : null}
       </form>
       {count === dimensions.width * dimensions.height && count > 0 ? (
         <p className="text-sm text-amber-700">
-          The entire image is selected. This will run as an ordinary unmasked
-          edit.
+          Selecting everything is the same as no selection — the run will edit
+          the whole image.
         </p>
       ) : null}
       {initialMask && initialMask.subject_version_id !== subject.versionId ? (
         <p className="text-sm text-amber-700">
-          The previous mask belongs to another version. Draw a new selection.
+          Area selection belongs to a different image. Select it again or remove
+          it.
         </p>
       ) : null}
       {initialMask &&
@@ -399,8 +415,13 @@ export function MaskEditor({
       (initialMask.width !== dimensions.width ||
         initialMask.height !== dimensions.height) ? (
         <p className="text-sm text-amber-700">
-          The previous mask dimensions do not match this image. Draw a new
+          The area selection dimensions do not match this image. Draw a new
           selection.
+        </p>
+      ) : null}
+      {hasReferences ? (
+        <p role="alert" className="text-sm text-red-700">
+          This node has references. Remove them to save an area selection.
         </p>
       ) : null}
       {error ? (
@@ -411,17 +432,17 @@ export function MaskEditor({
       <div className="flex justify-end gap-3">
         <button
           disabled={busy || !dimensions.width}
-          onClick={() => void save(true)}
+          onClick={() => (hasReferences ? onClose() : void save(true))}
           className="rounded-lg border px-3 py-2 text-sm"
         >
-          Remove mask
+          {hasReferences ? "Cancel" : "Remove selection"}
         </button>
         <button
-          disabled={busy || !dimensions.width}
+          disabled={busy || !dimensions.width || hasReferences}
           onClick={() => void save()}
           className="rounded-lg bg-neutral-900 px-4 py-2 text-sm text-white"
         >
-          Save mask
+          Save area selection
         </button>
       </div>
     </dialog>

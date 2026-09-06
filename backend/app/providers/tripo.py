@@ -9,12 +9,13 @@ class TripoProvider:
         self.transport = transport
         self.artifact_reader = artifact_reader
 
-    def prepare(self, *, source_url: str, textured: bool) -> dict[str, object]:
+    def prepare(self, *, source_url: str, textured: bool = True) -> dict[str, object]:
         image = self.artifact_reader.read(source_url)
         uploaded = self.transport.upload(content=image.content, filename=image.filename)
         return {
             "image_url": uploaded,
             "texture": "standard" if textured else "no",
-            # pbr=true forces textures on, even when texture="no".
-            "pbr": False,
+            "pbr": textured,
+            "texture_alignment": "original_image",
+            "orientation": "align_image",
         }

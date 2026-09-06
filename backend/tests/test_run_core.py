@@ -172,7 +172,7 @@ def test_resolution_rejects_second_subject_edge() -> None:
         SubjectEdge("e2", "b", "target", VersionPin(version_id="v2")),
     )
 
-    with pytest.raises(RunResolutionError, match="at most one subject"):
+    with pytest.raises(RunResolutionError, match="one input image"):
         resolve_inputs(
             target=target,
             inbound_edges=edges,
@@ -200,7 +200,7 @@ def test_resolution_rejects_third_connect_edge() -> None:
         for index in range(3)
     )
 
-    with pytest.raises(RunResolutionError, match="at most two connect"):
+    with pytest.raises(RunResolutionError, match="Two references maximum"):
         resolve_inputs(
             target=target,
             inbound_edges=edges,
@@ -218,7 +218,7 @@ def test_resolution_rejects_stale_mask() -> None:
     )
     subject = version("current", "source")
 
-    with pytest.raises(RunResolutionError, match="mask is stale"):
+    with pytest.raises(RunResolutionError, match="different image"):
         resolve_inputs(
             target=target,
             inbound_edges=(
@@ -271,11 +271,12 @@ def test_seed_precedence_is_override_then_subject_then_random() -> None:
 
 def test_edit_prompt_uses_the_accepted_preamble_exactly() -> None:
     assert build_prompt(user_prompt="  make it navy  ", op=Op.EDIT_INSTRUCT) == (
-        "Preserve exactly every unmentioned attribute, including geometry,\n"
-        "proportions, silhouette, camera angle, framing, lighting direction,\n"
-        "and background.\n"
-        "Change only: make it navy\n"
-        "Do not restyle or reinterpret any other element."
+        "This is an edit of the attached image. Keep the same object and the same\n"
+        "photograph: same camera angle and same framing.\n"
+        "Keep every attribute the instruction does not mention.\n"
+        "The instruction may change any attribute it names, including form,\n"
+        "proportions, colour, material, and finish. Apply it fully.\n\n"
+        "Instruction: make it navy\n\nThe background must be plain pure white."
     )
     assert "{resolved_user_prompt}" in PRESERVATION_PREAMBLE
 
@@ -283,9 +284,11 @@ def test_edit_prompt_uses_the_accepted_preamble_exactly() -> None:
 @pytest.mark.parametrize("op", [Op.GENERATE, Op.GENERATE_REF])
 def test_generate_prompt_appends_white_background_clause(op: Op) -> None:
     assert build_prompt(user_prompt="  a navy shoe  ", op=op) == (
-        "a navy shoe\n\nPlace the object on a clean white background."
+        "a navy shoe\n\nPlace the object on a plain pure white background."
     )
-    assert WHITE_BACKGROUND_CLAUSE == "Place the object on a clean white background."
+    assert (
+        WHITE_BACKGROUND_CLAUSE == "Place the object on a plain pure white background."
+    )
 
 
 @pytest.mark.parametrize("op", [Op.GENERATE, Op.GENERATE_REF])
@@ -299,13 +302,19 @@ def test_generate_prompt_omits_white_background_clause_when_disabled(op: Op) -> 
 @pytest.mark.parametrize(
     "op", [Op.EDIT_INSTRUCT, Op.EDIT_INPAINT, Op.EDIT_COMPOSITE, Op.EDIT_REF_GUIDED]
 )
-def test_edit_prompt_never_receives_white_background_clause(op: Op) -> None:
-    prompt = build_prompt(
-        user_prompt="make it navy",
-        op=op,
-        white_background=True,
+def test_edit_prompt_respects_white_background_setting(op: Op) -> None:
+    white_prompt = build_prompt(
+        user_prompt="make it navy", op=op, white_background=True
     )
-    assert WHITE_BACKGROUND_CLAUSE not in prompt
+    preserved_prompt = build_prompt(
+        user_prompt="make it navy", op=op, white_background=False
+    )
+    assert ("The background must be plain pure white." in white_prompt) == (
+        op != Op.EDIT_INPAINT
+    )
+    assert "Keep the same background." not in white_prompt
+    assert "plain pure white" not in preserved_prompt
+    assert "Keep the same background." in preserved_prompt
 
 
 def test_frozen_request_contains_only_resolved_artifacts_and_target_prompt() -> None:

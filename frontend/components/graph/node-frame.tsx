@@ -1,43 +1,121 @@
-import { Handle, Position } from "@xyflow/react";
-import type { ReactNode } from "react";
+import {
+  Handle,
+  Position,
+  useConnection,
+  useStore,
+  useUpdateNodeInternals,
+} from "@xyflow/react";
+import { useEffect, type ReactNode } from "react";
+import { nodeIsBlocked, type DesignNodeData } from "@/lib/graph";
 
-type NodeFrameProps = {
+export function NodeHandle({
+  data,
+  id,
+  role,
+  type,
+  fallback = false,
+}: {
+  data: DesignNodeData;
+  id: string;
+  role: "subject" | "connect";
+  type: "target" | "source";
+  fallback?: boolean;
+}) {
+  const connection = useConnection();
+  const available =
+    type === "source"
+      ? role === "connect" || !!data.activeVersionId
+      : !data.versions.length &&
+        data.run.status !== "running" &&
+        (role === "subject" || (!data.mask && data.connects.length < 2));
+  const validDrag =
+    connection.inProgress &&
+    type === "target" &&
+    connection.fromNode?.id !== id &&
+    connection.fromHandle?.id === role &&
+    available &&
+    !data.connects.some(
+      (ref) => role === "connect" && ref.nodeId === connection.fromNode?.id,
+    );
+  const label = `${type === "source" ? "Start" : "Add"} ${role === "subject" ? "input image" : "reference"}`;
+  return (
+    <Handle
+      id={role}
+      type={type}
+      position={type === "target" ? Position.Left : Position.Right}
+      className={`wire-handle wire-${role === "connect" ? "reference" : "subject"} ${fallback ? "subject-fallback" : ""} ${available ? "available" : ""} ${validDrag ? "valid-drop" : ""}`}
+      data-dragging={connection.inProgress || undefined}
+      aria-label={label}
+      title={label}
+      tabIndex={available ? 0 : -1}
+      role="button"
+      isConnectable={available}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          event.stopPropagation();
+          event.currentTarget.click();
+        }
+      }}
+    />
+  );
+}
+
+export function NodeFrame({
+  children,
+  selected,
+  title,
+  menu,
+  data,
+  id,
+}: {
   children: ReactNode;
   selected: boolean;
   title: ReactNode;
-};
-
-export function NodeFrame({ children, selected, title }: NodeFrameProps) {
+  menu: ReactNode;
+  data: DesignNodeData;
+  id: string;
+}) {
+  const updateInternals = useUpdateNodeInternals();
+  const needsMeasurement = useStore((state) => {
+    const node = state.nodeLookup.get(id);
+    return !!node?.measured.width && !node.internals.handleBounds;
+  });
+  useEffect(() => {
+    // A controlled data update can arrive between the initial measurement and
+    // its state commit. Recover bounds even when the card did not resize again.
+    if (needsMeasurement) updateInternals(id);
+  }, [id, needsMeasurement, updateInternals]);
   return (
     <div
-      className={`w-[19rem] rounded-[var(--radius-surface)] border bg-white text-foreground shadow-sm ${
-        selected ? "border-sky-500" : "border-neutral-300"
-      }`}
+      onTransitionEnd={(event) => {
+        if (event.propertyName === "height") updateInternals(id);
+      }}
+      data-state={
+        data.versions.length
+          ? "result"
+          : data.run.status === "running"
+            ? "running"
+            : data.run.status === "failed"
+              ? "failed"
+              : "draft"
+      }
+      data-kind={data.subject ? "edit" : "origin"}
+      data-selected={selected || undefined}
+      data-blocked={nodeIsBlocked(data) || undefined}
+      data-wire-highlighted={data.wireHighlighted || undefined}
+      className="design-card w-[19rem] rounded-[var(--radius-surface)] bg-white text-foreground"
     >
-      <Handle
-        className="!h-2.5 !w-2.5 !border-2 !border-white !bg-neutral-400"
-        id="subject"
-        style={{ top: "35%", background: "#0284c7" }}
-        title="Subject · pins this version"
-        position={Position.Left}
-        type="target"
-      />
-      <Handle
-        className="!h-3 !w-3 !border-2 !border-white !bg-purple-500"
-        id="connect"
-        position={Position.Left}
-        type="target"
-        style={{ top: "70%" }}
-        title="Connect · follows active image"
-      />
-      <div className="border-b border-neutral-200 px-3 py-2">{title}</div>
-      <div className="p-3">{children}</div>
-      <Handle
-        className="!h-2.5 !w-2.5 !border-2 !border-white !bg-neutral-400"
-        id="source"
-        position={Position.Right}
-        type="source"
-      />
+      <NodeHandle data={data} id={id} role="subject" type="source" />
+      <NodeHandle data={data} id={id} role="connect" type="source" />
+      {!data.subject ? (
+        <NodeHandle data={data} id={id} role="subject" type="target" fallback />
+      ) : null}
+      <div className="node-header flex items-center gap-2 border-b border-neutral-100 px-3 py-1.5">
+        <div className="min-w-0 flex-1">{title}</div>
+        {menu}
+      </div>
+      <div className="node-body">{children}</div>
     </div>
   );
 }

@@ -65,7 +65,7 @@ def decode_frozen_request(payload: Mapping[str, object]) -> FrozenRunRequest:
             aspect_ratio=_string(settings, "aspect_ratio"),
             width=_integer(settings, "width"),
             height=_integer(settings, "height"),
-            white_background=_boolean(settings, "whiteBackground", default=False),
+            white_background=_boolean(settings, "whiteBackground", default=True),
         ),
         subject=(
             _decode_version(_as_mapping(subject_value, "subject"))

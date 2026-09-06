@@ -1,3 +1,4 @@
+import secrets
 import uuid
 from datetime import UTC, datetime
 
@@ -16,6 +17,8 @@ from app.schemas.graph import (
     GraphEdgeData,
     GraphNodeData,
     NodeCreate,
+    NodeDuplicate,
+    NodeSettingsData,
     NodeUpdate,
     PromptUpdate,
     RunJobData,
@@ -26,6 +29,7 @@ from app.schemas.graph import (
 from app.services.graph_service import (
     GraphConflictError,
     GraphMutationError,
+    assert_draft_editable,
     create_branch,
     create_node,
     read_graph_document,
@@ -35,7 +39,12 @@ from app.services.graph_service import (
     update_node,
     update_prompt,
 )
-from app.services.run_jobs import RunSubmissionError, preview_run, submit_run
+from app.services.run_jobs import (
+    ResultRunError,
+    RunSubmissionError,
+    preview_run,
+    submit_run,
+)
 from app.services.run_queue import RunEnqueuer, get_run_enqueuer
 
 router = APIRouter(prefix="/api/projects", tags=["graph"])
@@ -45,7 +54,7 @@ def get_project_or_404(project_id: uuid.UUID, db: Session) -> Project:
     project = db.scalar(
         select(Project).where(Project.id == project_id).with_for_update()
     )
-    if project is None:
+    if project is None or project.deleted_at is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
         )
@@ -87,7 +96,7 @@ def patch_node(
     data: NodeUpdate,
     db: Session = Depends(get_db),
 ) -> GraphNodeData:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
     node = db.scalar(
         select(GraphNode)
         .where(
@@ -101,6 +110,7 @@ def patch_node(
         raise HTTPException(status_code=404, detail="Node not found")
     try:
         update_node(node, data, db)
+        project.updated_at = datetime.now(UTC)
         versions = list(
             db.scalars(
                 select(Version)
@@ -112,7 +122,7 @@ def patch_node(
         return serialize_node(node, versions)
     except GraphConflictError as error:
         db.rollback()
-        raise HTTPException(status_code=409, detail=str(error)) from error
+        raise HTTPException(409, str(error)) from error
     except GraphMutationError as error:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -127,7 +137,7 @@ def put_subject_edge(
     data: SubjectEdgeReplace,
     db: Session = Depends(get_db),
 ) -> GraphEdgeData:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
     try:
         edge = replace_subject_edge(
             project_id=project_id,
@@ -135,14 +145,18 @@ def put_subject_edge(
             data=data,
             db=db,
         )
+        project.updated_at = datetime.now(UTC)
         db.commit()
         return serialize_edge(edge)
+    except GraphConflictError as error:
+        db.rollback()
+        raise HTTPException(409, str(error)) from error
     except GraphMutationError as error:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(error)) from error
     except IntegrityError as error:
         db.rollback()
-        raise HTTPException(status_code=422, detail="Invalid subject edge") from error
+        raise HTTPException(status_code=422, detail="Invalid input image") from error
 
 
 @router.delete(
@@ -154,7 +168,14 @@ def delete_subject_edge(
     target_node_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> Response:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
+    node = db.get(GraphNode, target_node_id)
+    if node is None or node.project_id != project_id:
+        raise HTTPException(404, "Node not found")
+    try:
+        assert_draft_editable(node, db)
+    except GraphConflictError as error:
+        raise HTTPException(409, str(error)) from error
     db.execute(
         delete(GraphEdge).where(
             GraphEdge.project_id == project_id,
@@ -162,6 +183,7 @@ def delete_subject_edge(
             GraphEdge.role == "subject",
         )
     )
+    project.updated_at = datetime.now(UTC)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -173,9 +195,10 @@ def put_prompt(
     data: PromptUpdate,
     db: Session = Depends(get_db),
 ) -> GraphDocument:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
     try:
         update_prompt(project_id, node_id, data, db)
+        project.updated_at = datetime.now(UTC)
         db.commit()
         return read_graph_document(project_id, db)
     except GraphConflictError as error:
@@ -186,7 +209,7 @@ def put_prompt(
         raise HTTPException(422, str(error)) from error
     except IntegrityError as error:
         db.rollback()
-        raise HTTPException(422, "The connect wire is invalid") from error
+        raise HTTPException(422, "The reference wire is invalid") from error
 
 
 @router.post(
@@ -200,7 +223,7 @@ def post_branch(
     data: BranchCreate,
     db: Session = Depends(get_db),
 ) -> BranchData:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
     try:
         branch = create_branch(
             project_id=project_id,
@@ -208,8 +231,12 @@ def post_branch(
             data=data,
             db=db,
         )
+        project.updated_at = datetime.now(UTC)
         db.commit()
         return branch
+    except GraphConflictError as error:
+        db.rollback()
+        raise HTTPException(409, str(error)) from error
     except GraphMutationError as error:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -223,9 +250,11 @@ def get_run_preview(
 ) -> RunPreviewData:
     get_project_or_404(project_id, db)
     try:
-        return RunPreviewData(
-            op=preview_run(project_id=project_id, node_id=node_id, db=db)
-        )
+        preview = preview_run(project_id=project_id, node_id=node_id, db=db)
+        return RunPreviewData(op=preview.op)
+    except ResultRunError as error:
+        db.rollback()
+        raise HTTPException(409, str(error)) from error
     except (RunSubmissionError, ValueError) as error:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -257,7 +286,11 @@ def post_run(
             try:
                 enqueuer.enqueue(job_id)
             except Exception as error:
-                failed_job = db.get(RunJob, job_id)
+                failed_job = db.scalar(
+                    select(RunJob).where(RunJob.id == job_id).with_for_update()
+                )
+                if failed_job is not None and failed_job.status != "queued":
+                    return serialize_run_job(job_id, db)
                 if failed_job is not None:
                     failed_job.status = "failed"
                     failed_job.error = f"QueueError: {error}"[:8000]
@@ -267,6 +300,9 @@ def post_run(
                     status_code=503, detail="Run persisted but could not be enqueued"
                 ) from error
         return serialize_run_job(job_id, db)
+    except ResultRunError as error:
+        db.rollback()
+        raise HTTPException(409, str(error)) from error
     except (RunSubmissionError, ValueError) as error:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -324,7 +360,7 @@ def delete_node(
     node_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> Response:
-    get_project_or_404(project_id, db)
+    project = get_project_or_404(project_id, db)
     node = db.scalar(
         select(GraphNode)
         .where(GraphNode.id == node_id, GraphNode.project_id == project_id)
@@ -340,9 +376,80 @@ def delete_node(
         node.deleted_at = datetime.now(UTC)
     else:
         db.delete(node)
+    project.updated_at = datetime.now(UTC)
     try:
         db.commit()
     except SQLAlchemyError as error:
         db.rollback()
         raise HTTPException(status_code=409, detail="Node cannot be deleted") from error
     return Response(status_code=204)
+
+
+@router.post(
+    "/{project_id}/nodes/{node_id}/duplicate",
+    response_model=GraphNodeData,
+    status_code=201,
+)
+def duplicate_node(
+    project_id: uuid.UUID,
+    node_id: uuid.UUID,
+    data: NodeDuplicate,
+    db: Session = Depends(get_db),
+) -> GraphNodeData:
+    project = get_project_or_404(project_id, db)
+    source = db.scalar(
+        select(GraphNode).where(
+            GraphNode.id == node_id,
+            GraphNode.project_id == project_id,
+            GraphNode.deleted_at.is_(None),
+        )
+    )
+    if source is None:
+        raise HTTPException(404, "Node not found")
+    data.settings = NodeSettingsData.model_validate(
+        {
+            **source.settings,
+            "whiteBackground": source.settings.get("whiteBackground", True),
+        }
+    )
+    data.seed = secrets.randbits(32) if data.fresh_seed else source.seed
+    node = create_node(project_id, data, db)
+    # Copy the draft and wiring, not historical versions or the source's active pointer.
+    node.prompt = [
+        {**part, "edge_id": str(uuid.uuid4())}
+        if part["type"] == "connect"
+        else dict(part)
+        for part in source.prompt
+    ]
+    source_edges = list(
+        db.scalars(select(GraphEdge).where(GraphEdge.target_node_id == source.id))
+    )
+    chip_ids = {
+        part["source_node_id"]: uuid.UUID(part["edge_id"])
+        for part in node.prompt
+        if part["type"] == "connect"
+    }
+    for edge in source_edges:
+        db.add(
+            GraphEdge(
+                id=chip_ids[str(edge.source_node_id)]
+                if edge.role == "connect"
+                else uuid.uuid4(),
+                project_id=project_id,
+                source_node_id=edge.source_node_id,
+                target_node_id=node.id,
+                role=edge.role,
+                pin_mode=edge.pin_mode,
+                pinned_version_id=edge.pinned_version_id,
+                connect_order=edge.connect_order,
+            )
+        )
+    node.mask_rle, node.mask_width, node.mask_height, node.mask_subject_version_id = (
+        source.mask_rle,
+        source.mask_width,
+        source.mask_height,
+        source.mask_subject_version_id,
+    )
+    project.updated_at = datetime.now(UTC)
+    db.commit()
+    return serialize_node(node, [])

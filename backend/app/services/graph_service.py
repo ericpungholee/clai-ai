@@ -1,16 +1,16 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.domain.prompts import document_text, text_document
 from app.models.graph import (
     GraphEdge,
     GraphNode,
+    RunJob,
     Version,
     VersionMetric,
-    VersionVisibility,
 )
 from app.schemas.graph import (
     ActivePinData,
@@ -27,6 +27,7 @@ from app.schemas.graph import (
     NodeUpdate,
     PromptConnectData,
     PromptUpdate,
+    RunJobData,
     SubjectEdgeData,
     SubjectEdgeReplace,
     VersionData,
@@ -40,6 +41,26 @@ class GraphMutationError(ValueError):
 
 class GraphConflictError(GraphMutationError):
     pass
+
+
+def assert_draft_editable(node: GraphNode, db: Session) -> None:
+    if db.scalar(select(Version.id).where(Version.node_id == node.id).limit(1)):
+        raise GraphConflictError(
+            "This node has an image and is frozen. Continue editing to make a new node."
+        )
+    if db.scalar(
+        select(RunJob.id)
+        .where(
+            RunJob.node_id == node.id,
+            RunJob.status.in_(
+                ("queued", "dispatching", "provider_pending", "ingesting")
+            ),
+        )
+        .limit(1)
+    ):
+        raise GraphConflictError(
+            "Run in progress. Wait for it to finish before editing."
+        )
 
 
 def read_graph_document(project_id: uuid.UUID, db: Session) -> GraphDocument:
@@ -80,13 +101,6 @@ def read_graph_document(project_id: uuid.UUID, db: Session) -> GraphDocument:
         edges=[serialize_edge(edge) for edge in edges],
     )
     version_ids = [version.id for version in versions]
-    hidden = set(
-        db.scalars(
-            select(VersionVisibility.version_id).where(
-                VersionVisibility.version_id.in_(version_ids)
-            )
-        )
-    )
     masked_metrics = {
         metric.version_id: metric.change_magnitude
         for metric in db.scalars(
@@ -108,10 +122,43 @@ def read_graph_document(project_id: uuid.UUID, db: Session) -> GraphDocument:
             branches.setdefault(edge.pinned_version_id, []).append(edge.target_node_id)
     for node in document.nodes:
         for version in node.versions:
-            version.hidden = version.id in hidden
             version.branch_node_ids = branches.get(version.id, [])
             if version.op in {"edit_inpaint", "edit_composite"}:
                 version.masked_outside_change = masked_metrics.get(version.id)
+    ranked = (
+        select(
+            RunJob.id,
+            func.row_number()
+            .over(
+                partition_by=RunJob.node_id,
+                order_by=(RunJob.created_at.desc(), RunJob.id.desc()),
+            )
+            .label("rank"),
+        )
+        .where(RunJob.project_id == project_id)
+        .subquery()
+    )
+    jobs = db.execute(
+        select(
+            RunJob.id,
+            RunJob.node_id,
+            RunJob.status,
+            RunJob.attempts,
+            RunJob.error,
+            RunJob.created_at,
+            RunJob.completed_at,
+            RunJob.frozen_request["op"].as_string().label("op"),
+        )
+        .join(ranked, ranked.c.id == RunJob.id)
+        .where(ranked.c.rank == 1)
+    )
+    versions_by_job = {version.run_job_id: version.id for version in versions}
+    runs = {
+        row.node_id: RunJobData(**row._mapping, version_id=versions_by_job.get(row.id))
+        for row in jobs
+    }
+    for node in document.nodes:
+        node.run = runs.get(node.id)
     return document
 
 
@@ -132,6 +179,12 @@ def create_node(project_id: uuid.UUID, data: NodeCreate, db: Session) -> GraphNo
 
 
 def update_node(node: GraphNode, data: NodeUpdate, db: Session) -> GraphNode:
+    if data.model_fields_set & {"prompt", "settings", "seed", "subject", "mask"}:
+        assert_draft_editable(node, db)
+    if data.model_fields_set & {"subject", "mask"}:
+        raise GraphMutationError(
+            "Use the input image or area selection endpoint to edit this field."
+        )
     if data.expected_revision is not None and data.expected_revision != node.revision:
         raise GraphConflictError(
             "This node changed in another tab. Reload its latest draft before saving."
@@ -142,7 +195,7 @@ def update_node(node: GraphNode, data: NodeUpdate, db: Session) -> GraphNode:
     if "prompt" in fields and data.prompt is not None:
         if any(part["type"] == "connect" for part in node.prompt):
             raise GraphMutationError(
-                "Edit the prompt document to preserve its connect chips"
+                "Edit the prompt document to preserve its references"
             )
         node.prompt = text_document(data.prompt)
     if "settings" in fields and data.settings is not None:
@@ -153,12 +206,14 @@ def update_node(node: GraphNode, data: NodeUpdate, db: Session) -> GraphNode:
         node.position_x = data.position.x
         node.position_y = data.position.y
     if "active_version_id" in fields:
+        images = list(db.scalars(select(Version.id).where(Version.node_id == node.id)))
+        if images and (
+            data.active_version_id is None
+            or (len(images) == 1 and data.active_version_id != images[0])
+        ):
+            raise GraphConflictError("A result always presents its image.")
         _validate_active_version(node, data.active_version_id, db)
         node.active_version_id = data.active_version_id
-        if data.active_version_id is not None:
-            visibility = db.get(VersionVisibility, data.active_version_id)
-            if visibility is not None:
-                db.delete(visibility)
     node.updated_at = datetime.now(UTC)
     node.revision += 1
     db.flush()
@@ -169,19 +224,25 @@ def update_prompt(
     project_id: uuid.UUID, node_id: uuid.UUID, data: PromptUpdate, db: Session
 ) -> GraphNode:
     node = _lock_node(project_id, node_id, db)
+    assert_draft_editable(node, db)
+    if node.mask_rle and any(part.type == "connect" for part in data.document):
+        raise GraphMutationError(
+            "Area selections can't be combined with references. Remove "
+            "the selection first."
+        )
     if data.expected_revision != node.revision:
         raise GraphConflictError(
             "This prompt changed in another tab. Reload its latest draft before saving."
         )
     chips = [part for part in data.document if isinstance(part, PromptConnectData)]
     if len(chips) > 2:
-        raise GraphMutationError("A node accepts at most two connect chips")
+        raise GraphMutationError("Two references maximum. Remove one first.")
     if len({part.source_node_id for part in chips}) != len(chips) or len(
         {part.edge_id for part in chips}
     ) != len(chips):
-        raise GraphMutationError("Each connect source may appear only once")
+        raise GraphMutationError("Each reference source may appear only once")
     if any(part.source_node_id == node.id for part in chips):
-        raise GraphMutationError("A node cannot connect to itself")
+        raise GraphMutationError("A node cannot reference itself")
     if sum(len(part.text) for part in data.document if part.type == "text") > 8000:
         raise GraphMutationError("The prompt is limited to 8000 characters")
     current = {
@@ -203,7 +264,9 @@ def update_prompt(
             source.deleted_at is not None
             and (existing is None or existing.source_node_id != source.id)
         ):
-            raise GraphMutationError("The connect source no longer exists")
+            raise GraphMutationError(
+                "Source deleted — remove or replace this reference."
+            )
     # Replace wires and their text atoms together; flushing first permits reordering
     # without transient violations of the unique position/source constraints.
     db.execute(
@@ -239,9 +302,10 @@ def replace_subject_edge(
     db: Session,
 ) -> GraphEdge:
     target = _lock_node(project_id, target_node_id, db)
+    assert_draft_editable(target, db)
     source = _lock_node(project_id, data.source_node_id, db)
     if target.id == source.id:
-        raise GraphMutationError("A node cannot use itself as its subject")
+        raise GraphMutationError("A node cannot use itself as its input image")
     version = db.scalar(
         select(Version).where(
             Version.id == data.version_id,
@@ -249,7 +313,7 @@ def replace_subject_edge(
         )
     )
     if version is None:
-        raise GraphMutationError("The selected subject version does not exist")
+        raise GraphMutationError("The selected input image does not exist")
 
     edge = db.scalar(
         select(GraphEdge)
@@ -288,7 +352,7 @@ def create_branch(
         )
     )
     if version is None:
-        raise GraphMutationError("The selected branch version does not exist")
+        raise GraphMutationError("The selected image does not exist")
     # A retained version stays branchable even if its original canvas node was deleted.
     source = db.scalar(
         select(GraphNode)
@@ -296,14 +360,18 @@ def create_branch(
         .with_for_update()
     )
     if source is None:
-        raise GraphMutationError("The branch version does not belong to this project")
+        raise GraphMutationError("The image does not belong to this project")
     node = create_node(
         project_id,
         NodeCreate(
             id=data.id,
             title=data.title,
             prompt=data.prompt,
-            settings=data.settings,
+            settings=(
+                data.settings
+                if "settings" in data.model_fields_set
+                else _serialize_settings(source.settings)
+            ),
             position=data.position,
         ),
         db,
@@ -333,7 +401,8 @@ def serialize_node(node: GraphNode, versions: list[Version]) -> GraphNodeData:
         deleted=node.deleted_at is not None,
         settings=_serialize_settings(node.settings),
         seed=node.seed,
-        active_version_id=node.active_version_id,
+        active_version_id=node.active_version_id
+        or (versions[-1].id if versions else None),
         position=GraphPosition(x=node.position_x, y=node.position_y),
         versions=[serialize_version(version) for version in versions],
         mask=MaskData(
@@ -418,5 +487,5 @@ def _validate_active_version(
 
 def _serialize_settings(settings: dict[str, object]) -> NodeSettingsData:
     payload = dict(settings)
-    payload.setdefault("whiteBackground", False)
+    payload.setdefault("whiteBackground", True)
     return NodeSettingsData.model_validate(payload)

@@ -1,8 +1,11 @@
+import subprocess
 from collections.abc import Mapping
+from io import BytesIO
 from pathlib import Path
 
 import httpx
 import pytest
+from PIL import Image
 
 from app.domain.runs import (
     FrozenRunRequest,
@@ -30,6 +33,7 @@ from app.storage.artifacts import (
     FileArtifactStore,
     HttpArtifactReader,
     S3ArtifactStore,
+    image_content_type,
 )
 
 
@@ -375,12 +379,16 @@ def test_s3_store_sets_immutable_cache_and_digest_metadata() -> None:
 def test_ingestor_downloads_provider_output_before_returning_durable_url(
     tmp_path: Path,
 ) -> None:
+    image = BytesIO()
+    Image.new("RGB", (4, 4), "navy").save(image, "PNG")
+    content = image.getvalue()
+
     def respond(request: httpx.Request) -> httpx.Response:
         assert request.url.host == "v3.fal.media"
         return httpx.Response(
             200,
-            content=b"provider-image",
-            headers={"content-type": "image/png"},
+            content=content,
+            headers={"content-type": "application/octet-stream"},
         )
 
     reader = HttpArtifactReader(
@@ -410,9 +418,10 @@ def test_ingestor_downloads_provider_output_before_returning_durable_url(
 
     assert stored.artifact_url.startswith("https://cdn.clai.test/")
     assert stored.artifact_url != result.output_url
-    assert (tmp_path / "artifacts" / stored.storage_key).read_bytes() == (
-        b"provider-image"
-    )
+    assert (tmp_path / "artifacts" / stored.storage_key).read_bytes() == content
+    assert stored.content_type == "image/png"
+    with pytest.raises(ArtifactStorageError, match="unreadable"):
+        image_content_type(b"not an image")
 
 
 def test_http_reader_rejects_non_provider_host_without_requesting() -> None:
@@ -430,6 +439,9 @@ def test_http_reader_rejects_non_provider_host_without_requesting() -> None:
 
 
 def test_navy_shoe_acceptance_path_uses_only_fakes(tmp_path: Path) -> None:
+    image = BytesIO()
+    Image.new("RGB", (4, 4), "navy").save(image, "PNG")
+    content = image.getvalue()
     subject = VersionSnapshot(
         id="shoe-subject-v1",
         node_id="source",
@@ -477,7 +489,7 @@ def test_navy_shoe_acceptance_path_uses_only_fakes(tmp_path: Path) -> None:
     def respond(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
-            content=b"same-shoe-in-navy",
+            content=content,
             headers={"content-type": "image/png"},
         )
 
@@ -498,6 +510,37 @@ def test_navy_shoe_acceptance_path_uses_only_fakes(tmp_path: Path) -> None:
     assert transport.uploads == [(b"original-shoe", "shoe.jpg")]
     assert job.endpoint == "fal-ai/nano-banana-pro/edit"
     assert job.request_payload["prompt"] == frozen.prompt_at_runtime
-    assert (tmp_path / "artifacts" / stored.storage_key).read_bytes() == (
-        b"same-shoe-in-navy"
+    assert (tmp_path / "artifacts" / stored.storage_key).read_bytes() == content
+
+
+def test_drift_scoring_keeps_same_named_artifacts_separate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.drift import CommandDinoV2Scorer
+    from app.storage.artifacts import StoredArtifact
+
+    reader = FakeArtifactReader(
+        {
+            "clai://subject": ArtifactBytes(b"subject", "image/png", "output.png"),
+            "clai://generated": ArtifactBytes(b"generated", "image/png", "output.png"),
+        }
     )
+
+    def run(
+        arguments: list[str], **_options: object
+    ) -> subprocess.CompletedProcess[str]:
+        assert Path(arguments[-2]).read_bytes() == b"subject"
+        assert Path(arguments[-1]).read_bytes() == b"generated"
+        return subprocess.CompletedProcess(arguments, 0, stdout="0.7")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    scorer = CommandDinoV2Scorer(
+        command=("fake-scorer",), artifact_reader=reader, timeout_seconds=1
+    )
+    result = scorer.score(
+        request=request(Op.EDIT_INSTRUCT, subject=version("subject")),
+        artifact=StoredArtifact(
+            "generated", "clai://generated", "image/png", 9, "fake"
+        ),
+    )
+    assert result.status == "complete" and result.value == 0.7

@@ -4,10 +4,12 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models.graph import RunJob
+from app.services.run_execution import PendingDinoV2Scorer, execute_run_job
 from app.services.run_queue import get_run_enqueuer
 from tests.conftest import TestingSessionLocal
 from tests.test_graph import (
     CapturingEnqueuer,
+    FakeIngestor,
     FakeProvider,
     create_node,
     create_project,
@@ -63,17 +65,29 @@ def test_atomic_chips_order_active_following_broken_refs_and_conflicts(
             "Put the logo from image 1 on image 2"
         )
         assert "A lamp" not in frozen["prompt_at_runtime"]
-    _, new_av = submit_and_execute(client, project, str(a["id"]), queue, provider)
+    execute_run_job(
+        job_id=uuid.UUID(submitted.json()["id"]),
+        session_factory=TestingSessionLocal,
+        provider=provider,
+        ingestor=FakeIngestor(),
+        scorer=PendingDinoV2Scorer(),
+    )
+    # A new draft may reorder references; existing results remain frozen.
+    target = create_node(client, project, prompt="")
+    prefix = f"/api/projects/{project}/nodes/{target['id']}"
+    new_av = av
     assert (
         client.put(
             prefix + "/subject", json={"source_node_id": a["id"], "version_id": str(av)}
         ).status_code
         == 200
     )
+    a_chip = {**a_chip, "edge_id": str(uuid.uuid4())}
+    b_chip = {**b_chip, "edge_id": str(uuid.uuid4())}
     reordered = [a_chip, {"type": "text", "text": " with "}, b_chip]
     assert (
         client.put(
-            prefix + "/prompt", json={"document": reordered, "expected_revision": 1}
+            prefix + "/prompt", json={"document": reordered, "expected_revision": 0}
         ).status_code
         == 200
     )
@@ -83,18 +97,38 @@ def test_atomic_chips_order_active_following_broken_refs_and_conflicts(
         assert frozen["input_snapshot"]["subject_version_id"] == str(av)
         assert frozen["input_snapshot"]["connect_version_ids"] == [str(new_av), str(bv)]
         assert "image 2 with image 3" in frozen["prompt_at_runtime"]
+    execute_run_job(
+        job_id=uuid.UUID(submitted.json()["id"]),
+        session_factory=TestingSessionLocal,
+        provider=provider,
+        ingestor=FakeIngestor(),
+        scorer=PendingDinoV2Scorer(),
+    )
     assert client.delete(f"/api/projects/{project}/nodes/{b['id']}").status_code == 204
     graph = client.get(f"/api/projects/{project}/graph").json()
     assert next(node for node in graph["nodes"] if node["id"] == b["id"])["deleted"]
+    # Keep an existing reference through deletion by copying the frozen draft.
+    prior = target
+    copied = client.post(
+        f"/api/projects/{project}/nodes/{prior['id']}/duplicate",
+        json={"position": {"x": 0, "y": 850}},
+    ).json()
+    prefix = f"/api/projects/{project}/nodes/{copied['id']}"
+    a_chip = next(
+        part
+        for part in copied["document"]
+        if part["type"] == "connect" and part["source_node_id"] == a["id"]
+    )
     broken = client.post(prefix + "/runs", json={"idempotency_key": "broken"})
-    assert broken.status_code == 422 and "missing node" in broken.text
+    assert broken.status_code == 422 and "Source deleted" in broken.text
     assert (
         client.put(
-            prefix + "/prompt", json={"document": [a_chip], "expected_revision": 2}
+            prefix + "/prompt", json={"document": [a_chip], "expected_revision": 0}
         ).status_code
         == 200
     )
-    assert len(client.get(f"/api/projects/{project}/graph").json()["edges"]) == 2
+    wires = client.get(f"/api/projects/{project}/graph").json()["edges"]
+    assert len([edge for edge in wires if edge["target_node_id"] == copied["id"]]) == 2
 
 
 def test_duplicate_self_empty_and_plain_at_text(client: TestClient) -> None:

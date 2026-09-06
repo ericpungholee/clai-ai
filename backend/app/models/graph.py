@@ -63,7 +63,7 @@ class GraphNode(Base):
         ForeignKey("projects.id", ondelete="CASCADE"),
         index=True,
     )
-    title: Mapped[str] = mapped_column(String(120), default="Untitled concept")
+    title: Mapped[str] = mapped_column(String(120), default="")
     prompt: Mapped[list[PromptPart]] = mapped_column(json_type, default=list)
     revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     settings: Mapped[dict[str, object]] = mapped_column(
@@ -259,19 +259,6 @@ class VersionMetric(Base):
     )
 
 
-class VersionVisibility(Base):
-    __tablename__ = "version_visibility"
-
-    version_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("versions.id", ondelete="RESTRICT"),
-        primary_key=True,
-    )
-    hidden_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-
-
 class VersionMesh(Base):
     __tablename__ = "version_meshes"
     __table_args__ = (
@@ -301,7 +288,9 @@ class VersionMesh(Base):
     status: Mapped[str] = mapped_column(
         String(32), default="queued", server_default="complete"
     )
-    texture: Mapped[str] = mapped_column(String(16), default="no", server_default="no")
+    texture: Mapped[str] = mapped_column(
+        String(16), default="standard", server_default="standard"
+    )
     attempt_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), default=uuid.uuid4
     )

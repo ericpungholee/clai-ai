@@ -92,7 +92,7 @@ def test_full_mask_resolves_unmasked_but_stale_full_mask_still_blocks() -> None:
     frozen = freeze(MaskSnapshot("1 100", 10, 10, "s"))
     assert frozen.op == Op.EDIT_INSTRUCT and frozen.mask is None
     assert frozen.input_snapshot.mask_hash is None
-    with pytest.raises(ValueError, match="stale"):
+    with pytest.raises(ValueError, match="different image"):
         freeze(MaskSnapshot("1 100", 10, 10, "old"))
 
 
@@ -123,7 +123,7 @@ def test_invalid_spans_are_rejected(rle: str) -> None:
 
 
 def test_empty_and_entire_image_are_explicit() -> None:
-    with pytest.raises(ValueError, match="empty"):
+    with pytest.raises(ValueError, match="Select an area first"):
         validate_mask(MaskSnapshot(" ", 10, 10, "subject"))
     assert validate_mask(MaskSnapshot("1 100", 10, 10, "subject"))
 

@@ -2,12 +2,14 @@ import os
 import tempfile
 from dataclasses import dataclass
 from hashlib import sha256
+from io import BytesIO
 from mimetypes import guess_type
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 from urllib.parse import urlparse
 
 import httpx
+from PIL import Image, UnidentifiedImageError
 
 from app.domain.runs import FrozenRunRequest
 from app.providers.base import ArtifactBytes, ArtifactReader, ProviderResult
@@ -48,6 +50,21 @@ class S3Client(Protocol):
 
 class ArtifactStorageError(ValueError):
     pass
+
+
+def image_content_type(content: bytes) -> str:
+    # Provider MIME labels can be generic; verify bytes before committing a version.
+    try:
+        with Image.open(BytesIO(content)) as decoded:
+            if decoded.format not in {"PNG", "JPEG", "WEBP"}:
+                raise ArtifactStorageError("The provider returned an unsupported image")
+            content_type = Image.MIME[decoded.format]
+            decoded.verify()
+            return content_type
+    except (UnidentifiedImageError, OSError, SyntaxError) as error:
+        raise ArtifactStorageError(
+            "The provider returned an unreadable image"
+        ) from error
 
 
 class HttpArtifactReader:
@@ -240,11 +257,14 @@ class ArtifactIngestor:
 
     def ingest(self, result: ProviderResult) -> StoredArtifact:
         artifact = self._reader.read(result.output_url)
-        extension = _extension_for(artifact.content_type)
+        content_type = image_content_type(artifact.content)
+        extension = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}[
+            content_type
+        ]
         return self._store.put(
             key=f"runs/{result.job.request_id}/output{extension}",
             content=artifact.content,
-            content_type=artifact.content_type,
+            content_type=content_type,
         )
 
 
@@ -261,11 +281,3 @@ def _safe_destination(root: Path, storage_key: str) -> Path:
     if not destination.is_relative_to(root):
         raise ArtifactStorageError("Artifact storage key escapes its root")
     return destination
-
-
-def _extension_for(content_type: str) -> str:
-    return {
-        "image/jpeg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
-    }.get(content_type, ".bin")

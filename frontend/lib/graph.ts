@@ -33,7 +33,6 @@ export type Version = {
   };
   prompt_at_runtime: string;
   edit_depth: number;
-  hidden: boolean;
   branch_node_ids: string[];
   masked_outside_change: number | null;
 };
@@ -51,12 +50,16 @@ export type PersistedGraphNode = {
   document: PromptPart[];
   revision: number;
   deleted: boolean;
+  run: RunJob | null;
 };
 
 export type PromptPart =
   | { type: "text"; text: string }
   | { type: "connect"; edge_id: string; source_node_id: string };
+export type RunPreview = { op: Op };
+
 export type ConnectPreview = {
+  versionId: string | null;
   edgeId: string;
   nodeId: string;
   title: string;
@@ -88,12 +91,18 @@ export type GraphDocument = {
 };
 
 export type SubjectPreview = {
+  edgeId: string;
   nodeId: string;
   deleted: boolean;
   nodeTitle: string;
   versionId: string;
   artifactUrl: string;
 };
+
+export type NodeRunState =
+  | { status: "idle" }
+  | { status: "running"; job: RunJob | null; startedAt: string }
+  | { status: "failed"; message: string };
 
 export type DesignNodeData = {
   title: string;
@@ -107,16 +116,25 @@ export type DesignNodeData = {
   document: PromptPart[];
   revision: number;
   connects: ConnectPreview[];
-  resolvedOp: Op;
-  runState: "idle" | "running" | "failed";
-  runError: string | null;
+  remoteDeleted: boolean;
+  run: NodeRunState;
+  draftError: string | null;
   meshPreview: { versionId: string; url: string } | null;
+  previewMode: "image" | "mesh";
+  wireHighlighted?: boolean;
+  saveState: "saved" | "saving" | "failed";
+  highlightedWireId: string | null;
 } & Record<string, unknown>;
 
 export type WorkspaceEdgeData = (
   { role: "subject"; pin: VersionPin } | { role: "connect"; pin: ActivePin }
-) &
-  Record<string, unknown>;
+) & {
+  number: number;
+  showNumber?: boolean;
+  state: "ready" | "empty" | "deleted";
+  highlighted?: boolean;
+  dimmed?: boolean;
+} & Record<string, unknown>;
 
 export type WorkspaceNode = Node<DesignNodeData, "design">;
 export type WorkspaceEdge = Edge<WorkspaceEdgeData>;
@@ -240,6 +258,26 @@ export async function deleteDesignNode(
   );
 }
 
+export async function duplicateDesignNode(
+  projectId: string,
+  nodeId: string,
+  position: { x: number; y: number },
+  freshSeed = false,
+): Promise<PersistedGraphNode> {
+  return apiRequest(
+    `${browserApiUrl}/api/projects/${projectId}/nodes/${nodeId}/duplicate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: crypto.randomUUID(),
+        position,
+        fresh_seed: freshSeed,
+      }),
+    },
+  );
+}
+
 export async function replaceSubjectEdge(
   projectId: string,
   targetNodeId: string,
@@ -304,21 +342,6 @@ export async function getCollapsePreview(
   );
 }
 
-export async function setVersionHidden(
-  projectId: string,
-  versionId: string,
-  hidden: boolean,
-): Promise<void> {
-  await apiRequest(
-    `${browserApiUrl}/api/projects/${projectId}/versions/${versionId}/visibility`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hidden }),
-    },
-  );
-}
-
 export async function submitRun(
   projectId: string,
   nodeId: string,
@@ -329,8 +352,20 @@ export async function submitRun(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idempotency_key: idempotencyKey }),
+      body: JSON.stringify({
+        idempotency_key: idempotencyKey,
+      }),
     },
+  );
+}
+
+export async function getRunPreview(
+  projectId: string,
+  nodeId: string,
+): Promise<RunPreview> {
+  return apiRequest(
+    `${browserApiUrl}/api/projects/${projectId}/nodes/${nodeId}/run-preview`,
+    { cache: "no-store" },
   );
 }
 
@@ -358,7 +393,7 @@ export function toWorkspaceGraph(graph: GraphDocument): {
       .map((edge) => [edge.target_node_id, edge]),
   );
 
-  return {
+  const workspace: { nodes: WorkspaceNode[]; edges: WorkspaceEdge[] } = {
     nodes: graph.nodes
       .filter((node) => !node.deleted)
       .map((node) => {
@@ -373,9 +408,10 @@ export function toWorkspaceGraph(graph: GraphDocument): {
         const subject =
           edge && source && pinned
             ? {
+                edgeId: edge.id,
                 nodeId: source.id,
                 deleted: source.deleted,
-                nodeTitle: source.title,
+                nodeTitle: nodeLabel(source),
                 versionId: pinned.id,
                 artifactUrl: pinned.artifact_url,
               }
@@ -392,6 +428,9 @@ export function toWorkspaceGraph(graph: GraphDocument): {
             activeVersionId: node.active_version_id,
             versions: node.versions,
             meshPreview: null,
+            previewMode: "image",
+            saveState: "saved",
+            highlightedWireId: null,
             subject,
             mask: node.mask,
             document: node.document,
@@ -401,9 +440,10 @@ export function toWorkspaceGraph(graph: GraphDocument): {
               const source = nodesById.get(part.source_node_id);
               return [
                 {
+                  versionId: source?.active_version_id ?? null,
                   edgeId: part.edge_id,
                   nodeId: part.source_node_id,
-                  title: source?.title ?? "Deleted concept",
+                  title: source ? nodeLabel(source) : "Deleted reference",
                   state:
                     !source || source.deleted
                       ? "deleted"
@@ -413,78 +453,159 @@ export function toWorkspaceGraph(graph: GraphDocument): {
                 },
               ];
             }),
-            resolvedOp: resolveOp({
-              hasSubject: subject !== null,
-              hasMask: subject !== null && node.mask !== null,
-              connectCount: node.document.filter(
-                (part) => part.type === "connect",
-              ).length,
-            }),
-            runState: "idle" as const,
-            runError: null,
+            remoteDeleted: false,
+            run: runDisplay(node.run),
+            draftError: null,
           },
         };
       }),
     edges: graph.edges
       .filter(
         (edge) =>
-          !nodesById.get(edge.source_node_id)?.deleted &&
+          edge.role === "subject" &&
           !nodesById.get(edge.target_node_id)?.deleted,
       )
-      .map(toWorkspaceEdge),
+      .map((edge) => ({
+        id: edge.id,
+        type: "role",
+        source: edge.source_node_id,
+        target: edge.target_node_id,
+        sourceHandle: "subject",
+        targetHandle: "subject",
+        data: {
+          role: "subject" as const,
+          pin: edge.pin as VersionPin,
+          number: 1,
+          state: "ready" as const,
+        },
+      })),
   };
-}
-
-export function toWorkspaceEdge(edge: PersistedGraphEdge): WorkspaceEdge {
   return {
-    id: edge.id,
-    source: edge.source_node_id,
-    target: edge.target_node_id,
-    sourceHandle: "source",
-    targetHandle: edge.role,
-    style:
-      edge.role === "subject"
-        ? { stroke: "#0284c7", strokeWidth: 2 }
-        : { stroke: "#a855f7", strokeWidth: 2, strokeDasharray: "5 4" },
-    data:
-      edge.role === "subject"
-        ? { role: "subject", pin: edge.pin }
-        : { role: "connect", pin: edge.pin },
+    nodes: workspace.nodes,
+    edges: workspaceWires(workspace.nodes, workspace.edges),
   };
 }
 
-export function resolveOp(input: {
-  hasSubject: boolean;
-  hasMask: boolean;
-  connectCount: number;
-}): Op {
-  if (input.connectCount < 0 || input.connectCount > 2) {
-    throw new Error("A run accepts between zero and two connects");
-  }
-  if (input.hasMask && !input.hasSubject) {
-    throw new Error("A mask requires a subject");
-  }
-  if (!input.hasSubject && input.connectCount === 0) return "generate";
-  if (!input.hasSubject) return "generate_ref";
-  if (input.hasMask && input.connectCount === 0) return "edit_inpaint";
-  if (input.hasMask) return "edit_composite";
-  if (input.connectCount > 0) return "edit_ref_guided";
-  return "edit_instruct";
+export function runDisplay(job: RunJob | null): NodeRunState {
+  if (!job || job.status === "complete") return { status: "idle" };
+  if (job.status === "failed")
+    return {
+      status: "failed",
+      message: job.error ?? "The provider could not finish this run.",
+    };
+  return { status: "running", job, startedAt: job.created_at };
+}
+
+// Numbering follows compile_document: origin references start at 1; a subject
+// occupies image 1 on edit nodes. Derive wires from the same draft as the chips.
+export function referenceNumber(index: number, hasSubject: boolean): number {
+  return index + (hasSubject ? 2 : 1);
+}
+
+export function workspaceWires(
+  nodes: WorkspaceNode[],
+  edges: WorkspaceEdge[],
+): WorkspaceEdge[] {
+  const ids = new Set(nodes.map((node) => node.id));
+  return [
+    ...edges.filter(
+      (edge) =>
+        edge.data?.role === "subject" &&
+        ids.has(edge.source) &&
+        ids.has(edge.target),
+    ),
+    ...nodes.flatMap((target) =>
+      target.data.connects.map((ref, index): WorkspaceEdge => ({
+        id: ref.edgeId,
+        type: "role",
+        source: ids.has(ref.nodeId) ? ref.nodeId : target.id,
+        target: target.id,
+        sourceHandle: "connect",
+        targetHandle: "connect",
+        selected: edges.find((edge) => edge.id === ref.edgeId)?.selected,
+        data: {
+          role: "connect",
+          pin: { mode: "active" },
+          number: referenceNumber(index, !!target.data.subject),
+          state: ref.state,
+        },
+      })),
+    ),
+  ].map((edge) => ({
+    ...edge,
+    data: edge.data
+      ? {
+          ...edge.data,
+          showNumber: nodes.some(
+            (node) => node.id === edge.target &&
+              node.data.connects.length + Number(!!node.data.subject) > 1,
+          ),
+        }
+      : undefined,
+    ariaLabel: `${edge.data?.role === "subject" ? "Input" : "Reference"} image ${edge.data?.number}`,
+    interactionWidth: 24,
+    zIndex: 5,
+  }));
+}
+
+export function nodeIsBlocked(data: DesignNodeData): boolean {
+  if (data.versions.length) return false;
+  const reason = runBlockingReason(data);
+  return (
+    !!reason && reason !== "Enter a prompt." && reason !== "Run in progress."
+  );
+}
+
+export function runBlockingReason(data: DesignNodeData): string | null {
+  if (data.remoteDeleted) return "Node deleted — copy this text to a new node.";
+  if (data.versions.length)
+    return "This result is frozen. Continue editing to make a new node.";
+  if (data.run.status === "running") return "Run in progress.";
+  if (data.connects.some((ref) => ref.state === "deleted"))
+    return "Source deleted — remove or replace this reference.";
+  if (data.connects.some((ref) => ref.state === "empty"))
+    return "Reference has no image — run its source first.";
+  if (data.mask && data.connects.length > 0)
+    return "Area selections can't be combined with references. Remove the selection first.";
+  if (data.mask && data.mask.subject_version_id !== data.subject?.versionId)
+    return "Area selection belongs to a different image. Select it again or remove it.";
+  if (data.draftError) return data.draftError;
+  if (data.prompt.length > 8000) return "Prompt exceeds 8,000 characters.";
+  if (!data.prompt.trim()) return "Enter a prompt.";
+  return null;
 }
 
 async function apiRequest<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
+    const value =
+      body && typeof body === "object" && "detail" in body ? body.detail : null;
     const detail =
-      body &&
-      typeof body === "object" &&
-      "detail" in body &&
-      typeof body.detail === "string"
-        ? body.detail
-        : "Request failed";
+      typeof value === "string"
+        ? value
+        : Array.isArray(value)
+          ? value
+              .map((item: unknown) =>
+                item &&
+                typeof item === "object" &&
+                "msg" in item &&
+                typeof item.msg === "string"
+                  ? item.msg
+                  : "Invalid field",
+              )
+              .join(". ")
+          : "Request failed";
     throw new Error(detail);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+export function nodeLabel(node: { title: string; prompt: string }): string {
+  return (
+    node.title.trim() ||
+    node.prompt.trim().split(/\s+/).slice(0, 5).join(" ") ||
+    "Image"
+  );
 }

@@ -38,8 +38,9 @@ class CommandDinoV2Scorer:
             output = self._artifact_reader.read(artifact.artifact_url)
             with tempfile.TemporaryDirectory(prefix="clai-drift-") as directory:
                 root = Path(directory)
-                subject_path = root / subject.filename
-                output_path = root / output.filename
+                # Both immutable artifacts are commonly named output.png.
+                subject_path = root / f"subject{Path(subject.filename).suffix}"
+                output_path = root / f"generated{Path(output.filename).suffix}"
                 subject_path.write_bytes(subject.content)
                 output_path.write_bytes(output.content)
                 completed = subprocess.run(

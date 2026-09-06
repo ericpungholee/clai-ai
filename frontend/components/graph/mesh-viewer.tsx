@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ModelViewerElement } from "@google/model-viewer";
+import { DownloadButton } from "./download-button";
 import type { Version } from "@/lib/graph";
 import { requestMesh, type MeshData } from "@/lib/meshes";
 
@@ -23,7 +24,6 @@ export function MeshViewer({
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [textured, setTextured] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const previewCallback = useRef(onPreview);
   useEffect(() => {
@@ -76,7 +76,7 @@ export function MeshViewer({
       setState({
         status: "ready",
         mesh: await requestMesh(projectId, version.id, {
-          texture: textured ? "standard" : "no",
+          texture: "standard",
           attempt_id: crypto.randomUUID(),
         }),
       });
@@ -94,28 +94,44 @@ export function MeshViewer({
     <dialog
       ref={dialog}
       onCancel={onClose}
-      className="m-auto flex h-[85vh] w-[85vw] max-w-6xl flex-col rounded-xl bg-neutral-50 p-5 backdrop:bg-black/60"
+      className="m-auto flex h-[85vh] w-[85vw] max-w-6xl flex-col rounded-xl bg-white p-5 backdrop:bg-black/60"
     >
       <header className="flex justify-between">
         <h2 className="font-semibold">
-          3D form view ·{" "}
-          {mesh?.texture === "standard" ? "textured" : "untextured"}
+          3D view
         </h2>
-        <button onClick={onClose}>Back to canvas · Esc</button>
+        <div className="flex items-center gap-2">
+          {mesh?.status === "complete" ? <DownloadButton url={mesh.artifact_url} name={`clai-${version.id}`} extension="glb" label="Export 3D · GLB" /> : null}
+          <button onClick={onClose}>Close</button>
+        </div>
       </header>
-      <p className="mt-2 rounded bg-amber-50 p-3 text-sm text-amber-900">
-        The rear and hidden sides are inferred, not designed. This is a
-        single-image form study, not CAD or a manufacturable mesh.
-      </p>
-      <main className="relative mt-4 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-lg bg-neutral-200">
+      <div className="mt-2 flex gap-2 text-sm text-neutral-600">
+        Hidden sides are inferred and may vary.
+        <details className="relative">
+          <summary aria-label="About inferred details" className="cursor-pointer list-none">ⓘ</summary>
+          <p className="absolute right-0 z-10 w-72 rounded border bg-white p-3 shadow-md">
+            The rear and hidden sides are inferred. Colors and printed details are
+            reconstructed from the 2D image and may vary.
+          </p>
+        </details>
+      </div>
+      <main className="relative mt-4 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-lg bg-white">
         {mesh?.status === "complete" ? (
-          <GlbView key={version.id} mesh={mesh} />
+          <>
+            <GlbView key={mesh.attempt_id} mesh={mesh} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={version.artifact_url}
+              alt="Original 2D image used for this 3D view"
+              className="pointer-events-none absolute left-3 top-3 max-h-32 max-w-32 rounded border border-neutral-300 bg-white object-contain"
+            />
+          </>
         ) : (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={version.artifact_url}
-              alt="Image used for this version's 3D view"
+              alt="Image used for this image’s 3D view"
               className="mb-5 max-h-[45%] max-w-[60%] rounded object-contain"
             />
             {waiting ? (
@@ -124,19 +140,18 @@ export function MeshViewer({
                   {mesh.status === "queued"
                     ? "Queued"
                     : mesh.status === "ingesting"
-                      ? "Saving the mesh and preview"
-                      : "Generating the 3D form"}{" "}
-                  · {seconds}s in this view
+                      ? "Saving"
+                      : "Generating"}{" "}
+                  · {seconds}s
                 </p>
                 <p className="mt-2 text-sm text-neutral-600">
-                  This is slower than an image edit. You can close this view;
-                  the job keeps running.
+                  Safe to close — this keeps running.
                 </p>
               </div>
             ) : state.status === "loading" || state.status === "submitting" ? (
               <p role="status">
                 {state.status === "loading"
-                  ? "Checking this version’s cache…"
+                  ? "Checking saved 3D image…"
                   : "Queueing one 3D generation…"}
               </p>
             ) : (
@@ -146,42 +161,30 @@ export function MeshViewer({
                     {state.status === "error" ? state.message : mesh?.error}
                   </p>
                 ) : null}
-                <p className="mb-3 text-sm">
-                  Generate once, then reuse this version’s cached view.
-                  Generation latency has not yet been verified.
-                </p>
-                <label className="flex items-center justify-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={textured}
-                    onChange={(event) => setTextured(event.target.checked)}
-                  />
-                  Standard textures · $0.30 instead of $0.20
-                </label>
                 <button
                   onClick={create}
                   className="mt-4 rounded bg-neutral-900 px-4 py-2 text-sm text-white"
                 >
-                  {mesh?.status === "failed" ? "Retry" : "Generate"} 3D · $
-                  {textured ? "0.30" : "0.20"}
+                  {mesh?.status === "failed" ? "Retry" : "Generate"} 3D
                 </button>
-                <p className="mt-2 text-xs text-neutral-500">
-                  Grey geometry is the default. No HD, style or quad-mesh
-                  surcharges.
-                </p>
               </div>
             )}
           </>
         )}
       </main>
-      {mesh?.status === "complete" ? (
-        <p className="mt-2 text-xs text-neutral-500">
-          Cached for this exact image version.{" "}
-          {mesh.elapsed_seconds !== null
-            ? `Generated and saved in ${Math.round(mesh.elapsed_seconds)}s.`
-            : ""}{" "}
-          Drag to rotate; scroll to zoom.
-        </p>
+      {mesh?.status === "complete" && mesh.texture === "no" ? (
+        <div className="mt-3 flex items-center justify-between gap-4 rounded bg-white p-3 text-sm">
+          <p>
+            This saved model contains only the shape. Regenerate it from the 2D
+            image to include colors and print.
+          </p>
+          <button
+            onClick={create}
+            className="shrink-0 rounded bg-neutral-900 px-4 py-2 text-white"
+          >
+            Generate with colors & print
+          </button>
+        </div>
       ) : null}
     </dialog>
   );
@@ -189,6 +192,7 @@ export function MeshViewer({
 
 function GlbView({ mesh }: { mesh: MeshData & { status: "complete" } }) {
   const host = useRef<HTMLDivElement>(null);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -206,6 +210,9 @@ function GlbView({ mesh }: { mesh: MeshData & { status: "complete" } }) {
         viewer.style.width = "100%";
         viewer.style.height = "100%";
         if (mesh.preview_url) viewer.poster = mesh.preview_url;
+        viewer.addEventListener("load", () => {
+          if (alive) setLoaded(true);
+        });
         viewer.addEventListener("error", () => {
           if (alive)
             setError(
@@ -225,6 +232,14 @@ function GlbView({ mesh }: { mesh: MeshData & { status: "complete" } }) {
   }, [mesh.artifact_url, mesh.preview_url]);
   return (
     <>
+      {!loaded && mesh.preview_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={mesh.preview_url}
+          alt="Stored mesh preview while the viewer loads"
+          className="pointer-events-none absolute h-full w-full object-contain"
+        />
+      ) : null}
       {error ? (
         <p
           role="alert"

@@ -1,16 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { DownloadButton } from "./download-button";
 import type { Version } from "@/lib/graph";
 
 export function ImageViewer({
-  versions,
+  versions: initialVersions,
+  nodeNames = {},
   onClose,
 }: {
   versions: Version[];
+  nodeNames?: Record<string, string>;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const versions = initialVersions;
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
@@ -18,18 +22,17 @@ export function ImageViewer({
     <dialog
       ref={dialog}
       onCancel={onClose}
-      className="m-auto h-[94vh] w-[96vw] max-w-none rounded-xl bg-neutral-950 p-4 text-white backdrop:bg-black/70"
+      className="m-auto h-[94vh] w-[96vw] max-w-none rounded-xl bg-white p-4 text-neutral-900 backdrop:bg-black/70"
     >
       <header className="mb-3 flex items-center justify-between">
         <p className="text-sm">
-          {versions.length === 2 ? "Compare versions" : "Inspect image"} ·
-          Scroll to zoom, drag to pan
+          {versions.length === 2 ? "Compare images" : ""}
         </p>
         <button
           onClick={onClose}
           className="rounded border border-neutral-600 px-3 py-1 text-sm"
         >
-          Close · Esc
+          Close
         </button>
       </header>
       <div
@@ -39,13 +42,7 @@ export function ImageViewer({
           <ImagePane
             key={`${index}:${version.id}`}
             version={version}
-            label={
-              versions.length === 2
-                ? index === 0
-                  ? "Before / reference"
-                  : "After / comparison"
-                : "Original image"
-            }
+            label={nodeNames[version.node_id] ?? "Image"}
           />
         ))}
       </div>
@@ -55,34 +52,17 @@ export function ImageViewer({
 
 function ImagePane({ version, label }: { version: Version; label: string }) {
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
-  const [error, setError] = useState<string | null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
   const zoom = (factor: number) =>
     setView((current) => ({
       ...current,
       scale: Math.min(8, Math.max(0.25, current.scale * factor)),
     }));
-  const download = async () => {
-    try {
-      const response = await fetch(version.artifact_url);
-      if (!response.ok)
-        throw new Error("The original file could not be downloaded.");
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `clai-${version.id}.${blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : "png"}`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Download failed");
-    }
-  };
   return (
     <section className="flex min-h-0 flex-col gap-2">
-      <div className="flex items-center justify-between gap-2 text-xs text-neutral-300">
+      <div className="flex items-center justify-between gap-2 text-xs text-neutral-600">
         <span>
-          {label} · {new Date(version.created_at).toLocaleString()}
+          {label}
         </span>
         <div className="flex items-center gap-3">
           <button aria-label="Zoom out" onClick={() => zoom(1 / 1.25)}>
@@ -92,16 +72,11 @@ function ImagePane({ version, label }: { version: Version; label: string }) {
           <button aria-label="Zoom in" onClick={() => zoom(1.25)}>
             +
           </button>
-          <button onClick={download}>Download original</button>
+          <DownloadButton url={version.artifact_url} name={`${label}-${version.id}`} label="Download original" />
         </div>
       </div>
-      {error ? (
-        <p role="alert" className="text-xs text-red-300">
-          {error}
-        </p>
-      ) : null}
       <div
-        className="relative flex min-h-0 flex-1 cursor-grab items-center justify-center overflow-hidden rounded-lg bg-neutral-800 touch-none active:cursor-grabbing"
+        className="relative flex min-h-0 flex-1 cursor-grab items-center justify-center overflow-hidden rounded-lg bg-white touch-none active:cursor-grabbing"
         onWheel={(event) => {
           event.stopPropagation();
           zoom(event.deltaY < 0 ? 1.1 : 1 / 1.1);

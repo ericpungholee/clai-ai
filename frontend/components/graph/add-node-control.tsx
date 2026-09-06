@@ -9,7 +9,7 @@ export function AddNodeControl({ onAdd }: AddNodeControlProps) {
       onClick={onAdd}
       type="button"
     >
-      + Design node
+      Add node
     </button>
   );
 }

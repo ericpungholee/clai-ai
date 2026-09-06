@@ -2,7 +2,6 @@ from app.domain.runs import FrozenRunRequest, Op, VersionSnapshot
 from app.providers.base import (
     ArtifactReader,
     PreparedProviderRequest,
-    ProviderCapabilities,
     ProviderContractError,
     ProviderJob,
     ProviderResult,
@@ -15,12 +14,6 @@ class NanoBananaProProvider:
     model = "gemini-3-pro-image"
     generate_endpoint = "fal-ai/nano-banana-pro"
     edit_endpoint = "fal-ai/nano-banana-pro/edit"
-    capabilities = ProviderCapabilities(
-        mask=False,
-        references=3,
-        seed=True,
-        max_resolution=(4096, 4096),
-    )
 
     _generate_ops = frozenset({Op.GENERATE})
     _edit_ops = frozenset(
@@ -138,8 +131,7 @@ class NanoBananaProProvider:
             raise ProviderContractError("Unsupported Nano Banana Pro aspect ratio")
 
         width, height = request.settings.width, request.settings.height
-        max_width, max_height = self.capabilities.max_resolution
-        if width > max_width or height > max_height:
+        if width > 4096 or height > 4096:
             raise ProviderContractError(
                 "Requested resolution exceeds provider capability"
             )
@@ -156,7 +148,7 @@ class NanoBananaProProvider:
         }
 
         input_versions = _input_versions(request)
-        if len(input_versions) > self.capabilities.references:
+        if len(input_versions) > 3:
             raise ProviderContractError("Too many input images for Nano Banana Pro")
         if request.op in self._generate_ops and input_versions:
             raise ProviderContractError("Generate cannot include input images")

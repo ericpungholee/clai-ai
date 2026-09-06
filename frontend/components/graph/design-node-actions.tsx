@@ -4,21 +4,26 @@ import { createContext, useContext } from "react";
 import type { PromptPart } from "@/lib/graph";
 
 type DesignNodeActions = {
-  updatePrompt: (nodeId: string, prompt: string) => void;
   updateTitle: (nodeId: string, title: string) => void;
   updateWhiteBackground: (nodeId: string, enabled: boolean) => void;
   selectVersion: (nodeId: string, versionId: string) => void;
   branchVersion: (nodeId: string, versionId: string) => void;
-  hideVersion: (versionId: string, hidden: boolean) => void;
   collapseVersion: (versionId: string) => void;
   viewVersions: (versionIds: string[]) => void;
   viewMesh: (versionId: string) => void;
+  showMesh: (nodeId: string) => void;
+  disconnectSubject: (nodeId: string) => void;
+  deleteWire: (edgeId: string) => void;
   viewImage: (nodeId: string) => void;
+  duplicateNode: (nodeId: string) => void;
+  deleteNode: (nodeId: string) => void;
+  resolveDraft: (nodeId: string, keepMine: boolean) => void;
+  removeMask: (nodeId: string) => void;
   runNode: (nodeId: string) => void;
   editMask: (nodeId: string) => void;
   updateDocument: (nodeId: string, document: PromptPart[]) => void;
   candidates: (nodeId: string) => { id: string; title: string }[];
-  hoverNode: (nodeId: string | null) => void;
+  hoverWire: (nodeId: string | null) => void;
   jumpNode: (nodeId: string) => void;
 };
 

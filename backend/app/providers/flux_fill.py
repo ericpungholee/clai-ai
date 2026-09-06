@@ -6,7 +6,6 @@ from app.domain.runs import FrozenRunRequest, Op
 from app.providers.base import (
     ArtifactReader,
     PreparedProviderRequest,
-    ProviderCapabilities,
     ProviderContractError,
     ProviderJob,
     ProviderResult,
@@ -19,9 +18,6 @@ class FluxFillProvider:
     id = "fal"
     model = "flux-1-fill-pro"
     endpoint = "fal-ai/flux-pro/v1/fill"
-    capabilities = ProviderCapabilities(
-        mask=True, references=1, seed=True, max_resolution=(4096, 4096)
-    )
 
     def __init__(self, *, transport: FalTransport, artifact_reader: ArtifactReader):
         self._transport = transport

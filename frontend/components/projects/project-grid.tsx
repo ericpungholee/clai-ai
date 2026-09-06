@@ -1,6 +1,5 @@
 import type { Project } from "@/lib/projects";
 
-import { NewProjectButton } from "./new-project-button";
 import { ProjectTile } from "./project-tile";
 
 type ProjectGridProps = {
@@ -10,12 +9,10 @@ type ProjectGridProps = {
 export function ProjectGrid({ projects }: ProjectGridProps) {
   if (projects.length === 0) {
     return (
-      <div className="py-20">
-        <h2 className="text-base font-medium text-foreground">No projects yet</h2>
-        <p className="mt-1.5 mb-5 text-sm text-muted">
-          Create your first project to start exploring ideas.
-        </p>
-        <NewProjectButton />
+      <div className="empty-projects">
+        <h2 className="text-base font-medium text-foreground">
+          No projects yet
+        </h2>
       </div>
     );
   }
