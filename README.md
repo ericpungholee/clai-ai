@@ -1,5 +1,7 @@
 # Clai
 
+> **Award-winning foundation:** Clai builds on work that won 1st place and the Best Use of Google Gemini award among 82 teams at Hack Western. [View the original project on Devpost](https://devpost.com/software/vril).
+
 [![CI](https://github.com/ericpungholee/clai-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/ericpungholee/clai-ai/actions/workflows/ci.yml)
 
 Clai is a visual workspace for developing physical product concepts with generative AI. Each generation becomes an immutable point in a canvas-based edit history, so experiments stay visible, reproducible, and easy to branch.
