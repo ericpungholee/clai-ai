@@ -346,3 +346,120 @@ summary:focus-visible,
 .prompt-editor { background: #FFFFFF; }
 
 .wire-badge.unnumbered:not(.active):not(:focus-visible) { opacity: 0 !important; }
+
+/* Physical surfaces: top-left light, layered cast shadows, no 3D transforms. */
+:root {
+  --background: #f5f7f9;
+  --foreground: #282830;
+  --muted: #74737d;
+  --border: #dedde2;
+  --surface-muted: #eeedf1;
+  --accent: #0284c7;
+  --accent-hover: #0369a1;
+  --radius-control: 12px;
+  --radius-surface: 20px;
+  --pane-shadow: 0 1px 2px #00000021, 1px 5px 10px -2px #00000033, 2px 14px 26px -8px #00000047, 4px 30px 54px -20px #00000052;
+  --control-shadow: inset 0 1px 0 #fff, inset 0 9px 10px -9px #ffffffe6, inset 0 -1px 1px #0000000d, 0 1px 1.5px #0000001a, 0 6px 14px -5px #00000026;
+}
+.app-header {
+  position: relative;
+  z-index: 7;
+  background: linear-gradient(180deg, #fff, #f8f7f9);
+  border: 0;
+  box-shadow: 0 1px 2px #0000000d, 0 6px 20px -12px #00000030;
+}
+.brand { display: flex; align-items: center; gap: 12px; font-size: 20px; font-weight: 700; letter-spacing: -.7px; }
+.home-main { padding-top: 54px; padding-bottom: 70px; }
+.projects-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 26px; gap: 16px; }
+.projects-heading h1 { font-size: 18px; font-weight: 600; }
+.projects-heading h1 span { margin-left: 8px; padding: 3px 8px; border-radius: 8px; background: #e0f2fe; font-size: 11px; color: #0369a1; }
+.project-tile { min-width: 0; padding-bottom: 8px; }
+.project-thumb-wrap, .image-preview, .version-thumbnail {
+  position: relative;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-surface);
+  box-shadow: var(--pane-shadow);
+}
+.project-thumb-wrap { display: grid; place-items: center; background-color: #dfedf5; transition: box-shadow .15s; margin-bottom: 12px; }
+.project-tile:nth-child(3n+2) .project-thumb-wrap { background-color: #e0eff0; }
+.project-tile:nth-child(3n+3) .project-thumb-wrap { background-color: #e5ebf2; }
+.project-thumb-wrap::after, .image-preview::after, .version-thumbnail::after {
+  content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none; border-radius: inherit;
+  background: radial-gradient(130% 100% at 12% -12%, #ffffff42, #ffffff12 34%, #ffffff00 60%), radial-gradient(125% 105% at 88% 112%, #0000003d, #00000012 38%, #00000000 66%);
+}
+.project-tile > a:hover .project-thumb-wrap { box-shadow: 0 1px 2px #0002, 1px 5px 10px -2px #0003, 2px 18px 30px -8px #0004, 4px 36px 60px -20px #0005; }
+.project-placeholder { font-size: 74px; color: #ffffffc9; text-shadow: 0 1px 0 #fff, 1px 5px 7px #254c6430; }
+.empty-projects { padding: 65px 24px; text-align: center; background: #ffffff80; border-radius: 24px; box-shadow: inset 0 2px 5px #00000008; }
+/* Photo hit targets, menu rows, and wire controls keep their own semantics. */
+button:not(:where(.image-preview > button:first-child, .version-thumbnail > button, .overflow-menu-content button, .wire-badge, .subject-chip button, .badge-remove)) {
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fff, #f6f6f8 48%, #eaeaee);
+  box-shadow: var(--control-shadow);
+  text-shadow: 0 1px 0 #ffffffe6;
+  transition: background .12s, box-shadow .12s, transform .1s;
+}
+button:not(:where(.image-preview > button:first-child, .version-thumbnail > button, .overflow-menu-content button, .wire-badge, .subject-chip button, .badge-remove)):hover:not(:disabled) {
+  background: linear-gradient(180deg, #fff, #fcfcfe 48%, #efeff4);
+  box-shadow: inset 0 1px 0 #fff, inset 0 9px 10px -9px #ffffffe6, inset 0 -1px 1px #0000000d, 0 1px 1.5px #0000001a, 0 9px 18px -5px #00000030;
+}
+button:not(:where(.image-preview > button:first-child, .version-thumbnail > button, .overflow-menu-content button, .wire-badge, .subject-chip button, .badge-remove)):active:not(:disabled) {
+  transform: translateY(1px);
+  background: linear-gradient(180deg, #e9e9ed, #f4f4f6);
+  box-shadow: inset 0 2px 4px #00000026, inset 0 -1px 0 #ffffffcc, 0 1px 1px #00000012;
+}
+button.text-white:not(:disabled) { color: #fff; background: linear-gradient(180deg, #38bdf8, #0284c7); text-shadow: 0 1px 1px #0003; box-shadow: inset 0 1px 0 #ffffff66, inset 0 -1px 1px #0002, 0 1px 2px #0002, 0 6px 14px -5px #0369a170; }
+button.text-white:hover:not(:disabled) { background: linear-gradient(180deg, #7dd3fc, #0ea5e9); }
+button.text-white:active:not(:disabled) { background: linear-gradient(180deg, #0369a1, #38bdf8); }
+button.bg-red-700 { background: linear-gradient(180deg, #d75861, #b83140); }
+button.bg-red-700:hover:not(:disabled) { background: linear-gradient(180deg, #e66a74, #c64050); }
+button.text-white:disabled { color: #505963; text-shadow: none; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.project-rename button, dialog header button { padding: 7px 12px; font-size: 12px; }
+.project-rename input { background: #f4f3f6; border: 0; border-radius: 10px; box-shadow: inset 0 1px 3px #0002, 0 1px 0 #fff; }
+.design-card { border: 0; border-radius: 20px; background: linear-gradient(150deg, #fff, #f6f8fa); box-shadow: var(--pane-shadow); }
+.design-card:hover, .design-card[data-wire-highlighted="true"] { box-shadow: var(--pane-shadow); }
+.design-card[data-selected="true"] { border: 0; outline: 2px solid var(--accent); outline-offset: 3px; box-shadow: var(--pane-shadow); }
+.design-card[data-blocked="true"] { border: 0; outline: 2px solid var(--wire-error); }
+.node-body { padding: 12px; gap: 10px; }
+.image-preview { border-radius: 14px; box-shadow: 0 1px 2px #0002, 1px 3px 6px -2px #0003, 2px 7px 13px -4px #0003, 2px 15px 27px -10px #0003; }
+.preview-toolbar { z-index: 4; opacity: 1; background: #ffffffde; padding: 5px 7px; }
+.version-thumbnail { border-radius: 9px; box-shadow: 0 1px 2px #0002, 1px 3px 6px -2px #0003, 1px 7px 12px -5px #0003, 2px 12px 20px -10px #0003; }
+.thumbnail-menu { z-index: 4; }
+.react-flow { --xy-background-color: #f0f5f8; }
+.react-flow__controls { border: 0; border-radius: 12px; overflow: visible; box-shadow: var(--pane-shadow); }
+.react-flow__controls-button { border-radius: 8px; }
+.overflow-menu-content, dialog { border: 0; border-radius: 20px; box-shadow: var(--pane-shadow); background: linear-gradient(145deg, #fff, #f4f8fb); }
+.overflow-menu-content { padding: 8px; }
+.overflow-menu-content button { border-radius: 8px; }
+.overflow-menu-content button:hover { background: #e0f2fe; }
+.download-control { display: inline-flex; flex-direction: column; gap: 4px; }
+.export-button { padding: 5px 9px; font-size: 11px; white-space: nowrap; color: #0369a1; }
+.download-error { max-width: 240px; font-size: 11px; color: #a12638; white-space: normal; }
+button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (hover: none), (pointer: coarse) { .thumbnail-menu { opacity: 1; } }
+@media (max-width: 640px) {
+  .home-main { padding-top: 32px; }
+  dialog header { flex-wrap: wrap; gap: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { button, .project-thumb-wrap { transition: none !important; } }
+
+.project-tile { position: relative; }
+.project-options { position: absolute; right: 0; bottom: 16px; }
+.project-options > button { width: 32px; height: 32px; }
+.new-project-button { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; line-height: 1; }
+.workspace-project-name { position: relative; min-width: 0; max-width: 45vw; }
+.workspace-project-name .workspace-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 10px; background: transparent; box-shadow: none; text-shadow: none; }
+.project-name-error { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: 240px; padding: 10px; border-radius: 10px; background: white; color: #a12638; box-shadow: var(--pane-shadow); font-size: 12px; }
+
+/* Overflow triggers stay flat in every interaction state. */
+.overflow-menu > button.icon-button,
+.overflow-menu > button.icon-button:hover:not(:disabled),
+.overflow-menu > button.icon-button:active:not(:disabled) {
+  background: transparent;
+  box-shadow: none;
+  text-shadow: none;
+  transform: none;
+}
+.new-project-button > svg { display: block; }

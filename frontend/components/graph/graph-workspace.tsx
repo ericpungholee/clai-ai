@@ -49,6 +49,7 @@ import {
   type Version,
 } from "@/lib/graph";
 
+import { ProjectName } from "@/components/projects/project-name";
 import { RoleEdge } from "./role-edge";
 import { ConfirmDialog, type Confirmation } from "./confirm-dialog";
 import { AddNodeControl } from "./add-node-control";
@@ -1243,7 +1244,7 @@ export function GraphWorkspace({
             />
           ) : null;
         })()}
-        <header className="grid h-14 shrink-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center border-b border-border px-4 sm:px-6">
+        <header className="app-header grid h-14 shrink-0 grid-cols-[1fr_minmax(0,auto)_1fr] items-center border-b border-border px-4 sm:px-6">
           <Link
             className="w-fit text-sm font-medium text-neutral-600 hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             href="/"
@@ -1260,9 +1261,7 @@ export function GraphWorkspace({
           >
             ← Projects
           </Link>
-          <h1 className="max-w-[45vw] truncate text-sm font-semibold text-foreground">
-            {projectName}
-          </h1>
+          <ProjectName key={projectId} id={projectId} name={projectName} />
           <SaveStatus state={saveState} />
         </header>
         {connectionError ? (

@@ -1,3 +1,4 @@
+import { DownloadButton } from "./download-button";
 import type { NodeProps } from "@xyflow/react";
 import { memo, useState } from "react";
 import {
@@ -137,6 +138,7 @@ export const DesignNode = memo(function DesignNode({
             role="toolbar"
             aria-label="Image actions"
           >
+            {activeVersion ? <DownloadButton url={activeVersion.artifact_url} name={`${data.title}-${activeVersion.id}`} /> : null}
             {activeVersion ? (
               <IconButton
                 icon="mesh"

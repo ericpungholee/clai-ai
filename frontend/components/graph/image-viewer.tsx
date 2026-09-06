@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { DownloadButton } from "./download-button";
 import type { Version } from "@/lib/graph";
 
 export function ImageViewer({
@@ -51,29 +52,12 @@ export function ImageViewer({
 
 function ImagePane({ version, label }: { version: Version; label: string }) {
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
-  const [error, setError] = useState<string | null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
   const zoom = (factor: number) =>
     setView((current) => ({
       ...current,
       scale: Math.min(8, Math.max(0.25, current.scale * factor)),
     }));
-  const download = async () => {
-    try {
-      const response = await fetch(version.artifact_url);
-      if (!response.ok)
-        throw new Error("The original file could not be downloaded.");
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `clai-${version.id}.${blob.type === "image/jpeg" ? "jpg" : blob.type === "image/webp" ? "webp" : "png"}`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Download failed");
-    }
-  };
   return (
     <section className="flex min-h-0 flex-col gap-2">
       <div className="flex items-center justify-between gap-2 text-xs text-neutral-600">
@@ -88,14 +72,9 @@ function ImagePane({ version, label }: { version: Version; label: string }) {
           <button aria-label="Zoom in" onClick={() => zoom(1.25)}>
             +
           </button>
-          <button onClick={download}>Download original</button>
+          <DownloadButton url={version.artifact_url} name={`${label}-${version.id}`} label="Download original" />
         </div>
       </div>
-      {error ? (
-        <p role="alert" className="text-xs text-red-300">
-          {error}
-        </p>
-      ) : null}
       <div
         className="relative flex min-h-0 flex-1 cursor-grab items-center justify-center overflow-hidden rounded-lg bg-white touch-none active:cursor-grabbing"
         onWheel={(event) => {

@@ -42,12 +42,17 @@ export function NewProjectButton() {
         </span>
       )}
       <button
-        className="rounded-[var(--radius-control)] bg-accent px-3.5 py-2 text-sm font-medium text-white hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
+        className="new-project-button text-white"
+        aria-label={isCreating ? "Creating project" : "New Project"}
+        title="New Project"
+        aria-busy={isCreating}
         type="button"
         onClick={createProject}
         disabled={isCreating}
       >
-        {isCreating ? "Creating…" : "New Project"}
+        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          {isCreating ? <path d="M5 12h.01M12 12h.01M19 12h.01" /> : <path d="M12 5v14M5 12h14" />}
+        </svg>
       </button>
     </div>
   );

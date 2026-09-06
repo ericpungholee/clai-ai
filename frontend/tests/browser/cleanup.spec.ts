@@ -103,8 +103,8 @@ test("wire roles use separate endpoints, shapes, numbers and linked hover", asyn
     );
     await expect(node(page, id)).toHaveCSS("outline-style", "none");
     await expect(node(page, id).locator(".design-card")).toHaveCSS(
-      "border-color",
-      "rgb(212, 212, 212)",
+      "border-width",
+      "0px",
     );
   }
   await expect(node(page, "source").locator(".design-card")).toHaveAttribute(

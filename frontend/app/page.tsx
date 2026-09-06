@@ -7,16 +7,14 @@ export default async function Home() {
 
   return (
     <>
-      <header className="border-b border-border">
+      <header className="app-header">
         <div className="mx-auto flex h-14 w-full max-w-[1440px] items-center justify-between px-5 sm:px-7">
-          <span className="text-base font-semibold tracking-[-0.01em]">Clai</span>
+          <span className="brand">Clai</span>
           <NewProjectButton />
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[1440px] flex-1 px-5 py-7 sm:px-7">
-        <h1 className="mb-6 text-xl font-semibold tracking-[-0.01em]">
-          Projects
-        </h1>
+      <main className="home-main mx-auto w-full max-w-[1440px] flex-1 px-5 sm:px-7">
+        <div className="projects-heading"><h1>Projects <span>{projects.length}</span></h1></div>
         <ProjectGrid projects={projects} />
       </main>
     </>

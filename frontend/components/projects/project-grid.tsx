@@ -9,7 +9,7 @@ type ProjectGridProps = {
 export function ProjectGrid({ projects }: ProjectGridProps) {
   if (projects.length === 0) {
     return (
-      <div className="py-20">
+      <div className="empty-projects">
         <h2 className="text-base font-medium text-foreground">
           No projects yet
         </h2>

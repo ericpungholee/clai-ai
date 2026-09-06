@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { OverflowMenu } from "@/components/graph/overflow-menu";
+import { ConfirmDialog, type Confirmation } from "@/components/graph/confirm-dialog";
 import { changeProject, type Project } from "@/lib/projects";
 
 type ProjectTileProps = {
@@ -48,6 +50,7 @@ function formatUpdatedAt(value: string): string {
 
 export function ProjectTile({ project }: ProjectTileProps) {
   const router = useRouter();
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(project.name);
   const [busy, setBusy] = useState(false);
@@ -72,20 +75,20 @@ export function ProjectTile({ project }: ProjectTileProps) {
     : undefined;
 
   return (
-    <article>
+    <article className="project-tile" aria-label={project.name}>
       <Link
         className="group block rounded-[var(--radius-control)] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
         href={`/projects/${project.id}`}
       >
         <div
-          className="aspect-[4/3] rounded-[var(--radius-surface)] border border-border bg-surface-muted bg-cover bg-center group-hover:border-neutral-400 group-hover:bg-neutral-100"
+          className="project-thumb-wrap aspect-[4/3] bg-cover bg-center"
           style={thumbnailStyle}
           role={project.thumbnail_url ? "img" : undefined}
           aria-label={
             project.thumbnail_url ? `${project.name} thumbnail` : undefined
           }
-        />
-        <div className="pt-2.5">
+        >{!project.thumbnail_url ? <span className="project-placeholder" aria-hidden="true">✳</span> : null}</div>
+        <div className="pt-2.5 pr-10">
           <h2 className="truncate text-[15px] font-medium text-foreground group-hover:text-accent">
             {project.name}
           </h2>
@@ -99,7 +102,7 @@ export function ProjectTile({ project }: ProjectTileProps) {
       </Link>
       {renaming ? (
         <form
-          className="mt-2 flex gap-2"
+          className="project-rename mt-3 flex flex-wrap gap-2"
           onSubmit={(event) => {
             event.preventDefault();
             if (name.trim()) void mutate(name.trim());
@@ -107,13 +110,14 @@ export function ProjectTile({ project }: ProjectTileProps) {
         >
           <input
             aria-label="Project name"
+            disabled={busy}
             autoFocus
             maxLength={120}
             value={name}
             className="min-w-0 flex-1 rounded border px-2 py-1 text-sm"
             onChange={(event) => setName(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Escape") {
+              if (event.key === "Escape" && !busy) {
                 setRenaming(false);
                 setName(project.name);
               }
@@ -124,32 +128,33 @@ export function ProjectTile({ project }: ProjectTileProps) {
           </button>
           <button
             type="button"
-            onClick={() => setRenaming(false)}
+            disabled={busy}
+            onClick={() => { setRenaming(false); setName(project.name); }}
             className="text-xs"
           >
             Cancel
           </button>
         </form>
       ) : (
-        <div className="mt-2 flex gap-3 text-xs text-neutral-500">
-          <button disabled={busy} onClick={() => setRenaming(true)}>
+        <OverflowMenu label={`Options for ${project.name}`} className="project-options">
+          <button disabled={busy} onClick={() => { setName(project.name); setRenaming(true); }}>
             Rename
           </button>
           <button
             disabled={busy}
             onClick={() => {
-              if (
-                window.confirm(
-                  `Delete “${project.name}” from your projects? Its images and history will be retained, but it will no longer appear here.`,
-                )
-              )
-                void mutate();
+              setConfirmation({
+                message: `Delete “${project.name}” from your projects? Images and history will be retained.`,
+                verb: "Delete project",
+                resolve: (approved) => { if (approved) void mutate(); },
+              });
             }}
           >
             Delete
           </button>
-        </div>
+        </OverflowMenu>
       )}
+      {confirmation ? <ConfirmDialog confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
       {error ? (
         <p role="alert" className="mt-2 text-xs text-red-700">
           {error}

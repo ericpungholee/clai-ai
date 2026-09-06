@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ModelViewerElement } from "@google/model-viewer";
+import { DownloadButton } from "./download-button";
 import type { Version } from "@/lib/graph";
 import { requestMesh, type MeshData } from "@/lib/meshes";
 
@@ -99,7 +100,10 @@ export function MeshViewer({
         <h2 className="font-semibold">
           3D view
         </h2>
-        <button onClick={onClose}>Close</button>
+        <div className="flex items-center gap-2">
+          {mesh?.status === "complete" ? <DownloadButton url={mesh.artifact_url} name={`clai-${version.id}`} extension="glb" label="Export 3D · GLB" /> : null}
+          <button onClick={onClose}>Close</button>
+        </div>
       </header>
       <div className="mt-2 flex gap-2 text-sm text-neutral-600">
         Hidden sides are inferred and may vary.
