@@ -1336,10 +1336,10 @@ export function GraphWorkspace({
             onlyRenderVisibleElements
             minZoom={0.01}
             maxZoom={2}
-            selectionOnDrag
+            selectionOnDrag={false}
             multiSelectionKeyCode="Shift"
             panActivationKeyCode="Space"
-            panOnDrag={[1, 2]}
+            panOnDrag
             onConnect={(connection) => void onConnect(connection)}
             onEdgesChange={onEdgesChange}
             onInit={(instance) => {
@@ -1454,7 +1454,7 @@ export function GraphWorkspace({
               <button
                 onClick={() => setHelpOpen(true)}
                 aria-label="Keyboard shortcuts"
-                title="N: New node; B: New connected node; Cmd/Ctrl D: Duplicate draft; F: Fit; Shift: Select; Space: Pan; Delete: Delete; Cmd/Ctrl Enter: Run; @: Reference; Escape: Close"
+                title="N: New node; B: New connected node; Cmd/Ctrl D: Duplicate draft; F: Fit; Left-drag: Pan; Shift: Select; Delete: Delete; Cmd/Ctrl Enter: Run; @: Reference; Escape: Close"
                 className="rounded border bg-white px-2 py-1 text-neutral-500"
               >
                 ?

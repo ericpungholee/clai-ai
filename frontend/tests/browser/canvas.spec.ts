@@ -86,6 +86,14 @@ test("home rename/delete and a new project's empty canvas are usable", async ({
   await expect(page.getByText("Enter a prompt.", { exact: true })).toHaveCount(
     0,
   );
+  const viewport = page.locator(".react-flow__viewport");
+  const beforePan = await viewport.getAttribute("style");
+  const pane = (await page.locator(".react-flow__pane").boundingBox())!;
+  await page.mouse.move(pane.x + pane.width - 100, pane.y + pane.height - 100);
+  await page.mouse.down();
+  await page.mouse.move(pane.x + pane.width - 200, pane.y + pane.height - 180);
+  await page.mouse.up();
+  await expect(viewport).not.toHaveAttribute("style", beforePan!);
 });
 
 test("running locks a draft, success freezes it, and failure allows retry", async ({

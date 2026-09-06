@@ -15,8 +15,9 @@ const shortcuts = [
   ["Cmd/Ctrl+Enter", "Run"],
   ["@", "Add a reference"],
   ["F", "Frame whole graph"],
+  ["Left-drag", "Pan canvas"],
   ["Shift", "Select nodes"],
-  ["Space", "Pan"],
+  ["Space", "Pan over nodes"],
   ["Delete", "Delete selection"],
   ["Escape", "Close"],
 ];
