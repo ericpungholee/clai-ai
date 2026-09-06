@@ -32,12 +32,11 @@ package = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-markers = ["postgres: requires the isolated PostgreSQL test service"]
 
 [tool.ruff]
 target-version = "py312"
 line-length = 88
-src = ["app", "tests"]
+src = ["app"]
 exclude = ["alembic/versions"]
 
 [tool.ruff.lint]

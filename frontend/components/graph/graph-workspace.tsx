@@ -58,6 +58,7 @@ import { HelpPanel } from "./help-panel";
 import { MaskEditor } from "./mask-editor";
 import { ImageViewer } from "./image-viewer";
 import { MeshViewer } from "./mesh-viewer";
+import type { MeshDecal } from "@/lib/mesh-decals";
 import { CollapseDialog } from "./collapse-dialog";
 import { DesignNodeActionsContext } from "./design-node-actions";
 import { SaveStatus, type SaveState } from "./save-status";
@@ -145,6 +146,10 @@ export function GraphWorkspace({
   const [maskNodeId, setMaskNodeId] = useState<string | null>(null);
   const [viewedVersions, setViewedVersions] = useState<Version[]>([]);
   const [meshVersion, setMeshVersion] = useState<Version | null>(null);
+  // Viewer-only state. Never included in node patches, masks, runs or version data.
+  const [meshDecals, setMeshDecals] = useState<Record<string, MeshDecal | null>>(
+    {},
+  );
   const [collapseVersionId, setCollapseVersionId] = useState<string | null>(
     null,
   );
@@ -1149,6 +1154,10 @@ export function GraphWorkspace({
             key={meshVersion.id}
             projectId={projectId}
             version={meshVersion}
+            decals={meshDecals}
+            onDecalChange={(attemptId, decal) =>
+              setMeshDecals((current) => ({ ...current, [attemptId]: decal }))
+            }
             onClose={() => setMeshVersion(null)}
             onPreview={(versionId, url) => {
               const node = nodesRef.current.find((node) =>

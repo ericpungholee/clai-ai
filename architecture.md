@@ -42,9 +42,6 @@ flowchart LR
 | `backend/app/storage/` | Filesystem/S3 stores, artifact readers, image ingestion, and GLB validation. |
 | `backend/app/workers/celery_app.py` | Celery configuration, dependency construction, and image/mesh task entry points. |
 | `backend/alembic/` | Ordered schema/data migrations, including PostgreSQL triggers. |
-| `backend/tests/`, `frontend/tests/` | API/domain/storage tests, PostgreSQL invariants, browser codec tests, and browser workflows. |
-| `backend/scripts/report_drift_regression.py` | Offline report over saved drift observations; does not generate images. |
-| `docs/` | Lifecycle/migration notes and historical visual evidence. |
 
 [Docker Compose](docker-compose.yml) starts PostgreSQL, Redis, the API, a worker, and Next.js. Backend and worker run the same application code in separate processes. The API applies Alembic migrations before becoming healthy; the worker waits for the API. Dependency environments are separate Docker volumes. The frontend has separate dependency and Next.js build-cache volumes.
 
@@ -191,7 +188,7 @@ Durable state does not mean automatic recovery: there is no outbox publisher, re
 
 ## 7. Area selection and pixel preservation
 
-[MaskEditor](frontend/components/graph/mask-editor.tsx) draws brush/lasso/rectangle/erase selections in image coordinates, with local undo. Browser and Python codecs use one-based, row-major start/length RLE pairs and share the captured [SAM fixture](backend/tests/fixtures/sam-3-image-rle.json). Separate codecs are necessary because selections are edited in the browser and validated/composited in Python.
+[MaskEditor](frontend/components/graph/mask-editor.tsx) draws brush/lasso/rectangle/erase selections in image coordinates, with local undo. Browser and Python codecs use one-based, row-major start/length RLE pairs. Separate codecs are necessary because selections are edited in the browser and validated/composited in Python.
 
 Click/text selection calls the API synchronously, rather than creating a Celery run. The API validates project/version ownership and click bounds, reads the stored image, uploads it to `fal-ai/sam-3/image-rle`, unions returned masks, and returns RLE. Selection does not generate an edited image.
 
@@ -223,7 +220,7 @@ An existing attempt or nonfailed cache is reused. A completed textureless mesh m
 
 [GLB validation](backend/app/storage/meshes.py) checks the header/version/declared length and JSON chunk, rejects external buffer/image URLs, and requires a material-linked embedded color texture for textured jobs. It is application-level validation, not a complete glTF conformance checker. Optional preview images are decoded and verified before storage.
 
-`MeshViewer` polls every two seconds while waiting and dynamically loads `@google/model-viewer` in the browser. Completed previews can be shown on the card during the session. Closing the modal stops its polling but leaves worker execution running. The model is an inferred visualization, not editable CAD geometry.
+`MeshViewer` polls every two seconds while waiting and dynamically loads the Three.js scene in the browser. OrbitControls allows continuous 360° rotation and top/bottom inspection; Reset view restores the front camera. The source-image panel retains logo selection, placement, size, rotation, and removal controls without explanatory text blocks. Logo crops are projected onto the mesh and retained for the workspace session; GLB export contains the saved mesh only. Completed previews can be shown on the card during the session. Closing the modal stops its polling but leaves worker execution running. The model is an inferred visualization, not editable CAD geometry.
 
 ## 10. Artifact storage
 
@@ -270,27 +267,14 @@ The API sanitizes request-validation errors to type/location/message. Mutation c
 
 [Settings](backend/app/core/config.py) load `.env`, ignore extra fields, and cache the settings instance. `DATABASE_URL` is required. `REDIS_URL` selects the Celery broker/result backend. `FAL_KEY` is required for real image generation, SAM, and 3D. `FAL_TIMEOUT_SECONDS`, `FAL_OUTPUT_HOSTS`, artifact settings, optional drift command/timeout, and `CORS_ORIGINS` control the integrations. S3 mode requires bucket, access key, and secret key, with optional endpoint/region.
 
-[README](README.md) and [Makefile](Makefile) provide local commands. The PostgreSQL test profile creates a separate disposable database service. Apply the complete Alembic chain; do not delete old revisions because later revisions depend on them, even when a feature such as image visibility has been retired. The current head, `c9512e4a731b`, restores an active image on older hidden nodes and drops obsolete visibility preferences without deleting versions.
+[README](README.md) and [Makefile](Makefile) provide local commands. Apply the complete Alembic chain; do not delete old revisions because later revisions depend on them, even when a feature such as image visibility has been retired. The current head, `c9512e4a731b`, restores an active image on older hidden nodes and drops obsolete visibility preferences without deleting versions.
 
 There is no authentication, ownership/authorization model, billing, rate limiting, sharing, or hosted deployment configuration. CORS is not access control. Readiness verifies PostgreSQL and Redis, not fal credentials, worker availability, or artifact storage. The implementation has no run-all scheduler, automatic provider fallback, cancellation, realtime presence, or artifact retention sweeper.
 
-## 13. Verification and cleanup decisions
+## 13. Validation and repository maintenance
 
-The codebase review covered production modules, their imports/callers, frontend selectors, dependency manifests, migrations, fixtures, browser workflows, development configuration, and Markdown references. No identical nonempty tracked files were found. All declared application dependencies have runtime/build uses; no lockfile or migration was removed.
+Runtime imports, exported symbols, CSS selectors, dependency manifests, and file contents were audited. Application modules and dependencies remain in use; no identical nonempty production files were found. The unused empty Next.js configuration was removed. Database migrations and compatibility paths for retained images remain necessary.
 
-Cleanup removed the unused browser `getRunPreview` wrapper/type, the unconsumed White bg action and fresh-seed wrapper parameter, and selectors for the retired thumbnail menu. Shared frontend API origins/response handling now live in `lib/api.ts`, and project creation requests live with the other project requests. Domain/provider validation remains separate because the boundaries validate different contracts. Python and TypeScript mask codecs remain covered by the same fixture.
+Tests, benchmark runners, timing reports, and saved performance baselines are local-only and are not part of the git tree. `make test` runs frontend lint and type checking. `make lint` covers application Python and frontend lint. `make benchmark` remains available locally when those scripts are present.
 
-This guide replaces `CORE_FEATURES.md`, `REFACTOR_PLAN.md`, `docs/CANVAS_AI_NODE_WORKFLOWS.md`, and the old prepared UI PR description, which duplicated scope and described retired actions, visibility, naming, or export behavior. Historical visual captures remain explicitly labeled as evidence rather than current specifications. The workflow test now writes recordings only to ignored test output, so running it no longer overwrites tracked documentation assets. Stale browser assertions and the removed visibility-table setup in a PostgreSQL test were corrected; duplicated project rename/delete coverage was removed from the canvas test while preserving its empty-state/panning checks. Agent instruction files, package markers, generated-dependency exclusions, and migration support files remain useful.
-
-The main remaining concentration of frontend complexity is `GraphWorkspace`: saves, polling, graph merges, and actions share a coordinator of roughly 1,500 lines. Splitting those responsibilities would be a behavioral refactor, not proven dead-code removal; it should preserve the existing browser conflict/deletion/run coverage. The full-graph refresh also reads all retained history, so large long-lived projects may eventually need pagination or incremental synchronization.
-
-Backend tests exercise real API/services with SQLite and provider/storage doubles. A separate PostgreSQL suite checks triggers, locking, constraints, migrations, and concurrent reference limits. Browser tests use the real Next.js frontend against `tests/fake-api.ts`; they cover interactions rather than real FastAPI/provider integration. Codec tests pin browser/Python agreement. None of these tests demonstrates live provider visual quality, pricing, or latency.
-
-Validation completed for this review on September 6, 2026:
-
-- Backend suite: 100 passed; the seven PostgreSQL-only cases were skipped in the local SQLite run and then all seven passed in the isolated Compose test service.
-- Browser suite: all 42 passed after correcting the stale assertions/setup described above.
-- Frontend codec unit tests: both passed.
-- Ruff checks/format validation, ESLint, TypeScript, production `next build`, and `git diff --check` passed.
-- Local Markdown links resolved; generated browser captures left tracked documentation images/videos unchanged. The temporary PostgreSQL test service was stopped after validation.
-- Existing test tooling emitted a Starlette/httpx deprecation warning. No live paid provider calls were made.
+`GraphWorkspace` still coordinates saves, polling, merges, and actions. All of those paths are active; splitting them is a separate behavioral refactor. Full-graph refreshes read retained history, so large projects may eventually benefit from pagination or incremental synchronization.
