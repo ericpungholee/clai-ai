@@ -1,6 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { mkdir, copyFile } from "node:fs/promises";
-import path from "node:path";
 
 test("record generate → continue editing → area selection → run", async ({
   browser,
@@ -24,7 +22,7 @@ test("record generate → continue editing → area selection → run", async ({
     .getByRole("button", { name: "New Project", exact: true })
     .first()
     .click();
-  await expect(page.getByText("1. Describe a design.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add node", exact: true })).toBeVisible();
   await page.waitForTimeout(1800);
   await page.getByRole("button", { name: "Add node", exact: true }).click();
   await page
@@ -81,13 +79,8 @@ test("record generate → continue editing → area selection → run", async ({
   await page.screenshot({ path: testInfo.outputPath("finished.png") });
   const video = page.video()!;
   await context.close();
-  const destination = path.resolve("../docs/node-lifecycle/workflow.webm");
-  await mkdir(path.dirname(destination), { recursive: true });
+  const destination = testInfo.outputPath("workflow.webm");
   await video.saveAs(destination);
-  await copyFile(
-    testInfo.outputPath("finished.png"),
-    path.resolve("../docs/node-lifecycle/finished.png"),
-  );
   await testInfo.attach("30-second workflow (fixture provider)", {
     path: destination,
     contentType: "video/webm",

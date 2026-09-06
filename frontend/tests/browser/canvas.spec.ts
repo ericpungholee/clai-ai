@@ -59,23 +59,33 @@ test("a fifty-node canvas supports fit, new-node and duplicate shortcuts", async
   ).toHaveValue("");
 });
 
-test("home rename/delete and a new project's empty canvas are usable", async ({
+test("a new project's empty canvas starts from Add node", async ({
   page,
+  request,
 }) => {
+  await request.post("http://127.0.0.1:8109/empty-projects");
   await page.goto("/");
-  await page.getByRole("button", { name: "Rename", exact: true }).click();
-  await page.getByRole("textbox", { name: "Project name" }).fill("Desk forms");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Desk forms" })).toBeVisible();
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "Delete", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "No projects yet" }),
-  ).toBeVisible();
   await page
     .getByRole("button", { name: "New Project", exact: true })
     .first()
     .click();
+  await expect(
+    page.getByRole("button", { name: "Add node", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("1. Describe a design.")).toHaveCount(0);
+  await page.getByRole("button", { name: "Add node", exact: true }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Design prompt" }),
+  ).toHaveCount(1);
+});
+
+test("a new draft has helpful empty state and supports left-drag panning", async ({
+  page,
+  request,
+}) => {
+  await request.post(`${api}/empty-projects`);
+  await page.goto("/");
+  await page.getByRole("button", { name: "New Project", exact: true }).click();
   await page.getByRole("button", { name: "Add node" }).click();
   await expect(
     page.getByRole("textbox", { name: "Design prompt" }),

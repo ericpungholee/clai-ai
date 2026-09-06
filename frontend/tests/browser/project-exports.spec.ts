@@ -56,7 +56,7 @@ test("failed image exports show an error and can be retried", async ({ page }) =
   await expect(source.getByRole("alert")).toHaveCount(0);
 });
 
-test("canvas project title supports save, cancel, and reload", async ({ page }) => {
+test("canvas project title autosaves on blur and reloads", async ({ page }) => {
   await page.goto("/projects/fixture-project");
   const rename = page.getByRole("button", { name: /^Rename project:/ });
   await rename.click();
@@ -64,8 +64,11 @@ test("canvas project title supports save, cancel, and reload", async ({ page }) 
   await page.keyboard.press("Escape");
   await expect(rename).not.toContainText("Cancelled title");
   await rename.click();
-  await page.getByRole("textbox", { name: "Project name", exact: true }).fill("Sky lamp");
-  await page.keyboard.press("Enter");
+  const nameField = page.getByRole("textbox", { name: "Project name", exact: true });
+  await nameField.fill("Sky lamp");
+  await expect(page.getByRole("button", { name: "Save project name" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Cancel rename" })).toHaveCount(0);
+  await nameField.blur();
   await expect(rename).toHaveText("Sky lamp");
   await page.reload();
   await expect(rename).toHaveText("Sky lamp");

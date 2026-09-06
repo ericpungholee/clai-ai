@@ -163,7 +163,7 @@ export function MeshViewer({
                 ) : null}
                 <button
                   onClick={create}
-                  className="mt-4 rounded bg-neutral-900 px-4 py-2 text-sm text-white"
+                  className="mt-4 rounded bg-neutral-900 px-4 py-2 text-sm font-bold text-white"
                 >
                   {mesh?.status === "failed" ? "Retry" : "Generate"} 3D
                 </button>

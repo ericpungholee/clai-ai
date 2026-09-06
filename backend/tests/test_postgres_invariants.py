@@ -403,10 +403,6 @@ def test_version_trigger_rejects_updates_and_deletes(
         project_id = insert_project(connection)
         node_id = insert_node(connection, project_id)
         version_id = insert_version(connection, project_id, node_id)
-        connection.execute(
-            text("INSERT INTO version_visibility (version_id) VALUES (:id)"),
-            {"id": version_id},
-        )
 
     for statement in (
         "UPDATE versions SET artifact_url = 'https://changed.test' WHERE id = :id",
