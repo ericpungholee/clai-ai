@@ -95,7 +95,7 @@ export function RoleEdge({
           onFocus={() => actions.hoverWire(id)}
           onBlur={() => actions.hoverWire(null)}
           onClick={() => actions.deleteWire(id)}
-          className={`wire-badge nodrag nopan ${subject && !broken ? "filled" : ""} ${active ? "active" : ""}`}
+          className={`wire-badge nodrag nopan ${subject && !broken ? "filled" : ""} ${active ? "active" : ""} ${data?.showNumber === false && !broken ? "unnumbered" : ""}`}
           style={
             {
               transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
@@ -105,7 +105,7 @@ export function RoleEdge({
           }
         >
           <span className="badge-number">
-            {broken ? "!" : data?.state === "empty" ? "" : data?.number}
+            {broken ? "!" : data?.state === "empty" ? "" : data?.showNumber === false ? "" : data?.number}
           </span>
           <span className="badge-remove" aria-hidden="true">
             ×

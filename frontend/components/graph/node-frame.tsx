@@ -111,7 +111,7 @@ export function NodeFrame({
       {!data.subject ? (
         <NodeHandle data={data} id={id} role="subject" type="target" fallback />
       ) : null}
-      <div className="flex items-center gap-2 border-b border-neutral-100 px-3 py-1.5">
+      <div className="node-header flex items-center gap-2 border-b border-neutral-100 px-3 py-1.5">
         <div className="min-w-0 flex-1">{title}</div>
         {menu}
       </div>

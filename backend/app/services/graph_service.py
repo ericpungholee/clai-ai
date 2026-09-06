@@ -46,8 +46,7 @@ class GraphConflictError(GraphMutationError):
 def assert_draft_editable(node: GraphNode, db: Session) -> None:
     if db.scalar(select(Version.id).where(Version.node_id == node.id).limit(1)):
         raise GraphConflictError(
-            "This node has an image and is frozen. Continue editing or "
-            "Revise prompt to make a new node."
+            "This node has an image and is frozen. Continue editing to make a new node."
         )
     if db.scalar(
         select(RunJob.id)
@@ -368,7 +367,11 @@ def create_branch(
             id=data.id,
             title=data.title,
             prompt=data.prompt,
-            settings=data.settings,
+            settings=(
+                data.settings
+                if "settings" in data.model_fields_set
+                else _serialize_settings(source.settings)
+            ),
             position=data.position,
         ),
         db,
@@ -484,5 +487,5 @@ def _validate_active_version(
 
 def _serialize_settings(settings: dict[str, object]) -> NodeSettingsData:
     payload = dict(settings)
-    payload.setdefault("whiteBackground", False)
+    payload.setdefault("whiteBackground", True)
     return NodeSettingsData.model_validate(payload)

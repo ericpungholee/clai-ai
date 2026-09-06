@@ -1,4 +1,3 @@
-import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -7,7 +6,6 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.domain.prompts import PromptPart
 from app.domain.runs import FrozenRunRequest
 from app.models.graph import GraphNode, RunJob, Version, VersionMetric
 from app.models.project import Project
@@ -202,25 +200,6 @@ def _commit_version(
         )
         db.add(version)
         db.flush()
-        if node.title in {"Untitled concept", "Untitled node"}:
-            # Titles are a visible shorthand, never additional generation context.
-            source_ids = [
-                uuid.UUID(part["source_node_id"])
-                for part in node.prompt
-                if part["type"] == "connect"
-            ]
-            sources = (
-                db.scalars(
-                    select(GraphNode).where(
-                        GraphNode.id.in_(source_ids), GraphNode.project_id == project_id
-                    )
-                ).all()
-                if source_ids
-                else []
-            )
-            node.title = auto_node_title(
-                node.prompt, {str(source.id): source.title for source in sources}
-            )
         node.active_version_id = version.id
         if project is not None:
             project.thumbnail_url = artifact.artifact_url
@@ -240,20 +219,6 @@ def _commit_version(
         job.completed_at = datetime.now(UTC)
         job.error = None
         return version.id
-
-
-def auto_node_title(document: list[PromptPart], source_titles: dict[str, str]) -> str:
-    text = "".join(
-        part["text"]
-        if part["type"] == "text"
-        else source_titles.get(part["source_node_id"], "")
-        for part in document
-    ).strip()
-    text = re.sub(r"^image\s+\d+[.,:]?\s*", "", text, count=1, flags=re.IGNORECASE)
-    title = " ".join(text.split()[:5])[:60]
-    if not title or re.match(r"^image\s+\d+\b", title, flags=re.IGNORECASE):
-        return "Untitled concept"
-    return title
 
 
 def _record_failure(

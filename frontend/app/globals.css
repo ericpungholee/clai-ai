@@ -104,7 +104,7 @@ a {
 .design-card {
   position: relative;
   border: 1px solid #d4d4d4;
-  box-shadow: 0 1px 2px #0001;
+  box-shadow: none;
 }
 .design-card:hover,
 .design-card[data-wire-highlighted="true"] {
@@ -144,7 +144,7 @@ a {
   pointer-events: none;
 }
 .subject-chip {
-  background: #fafafa;
+  background: #FFFFFF;
 }
 .react-flow__handle.wire-handle {
   width: var(--wire-handle-size);
@@ -203,7 +203,8 @@ a {
 .icon-button:hover,
 .icon-button[aria-pressed="true"] {
   color: #262626;
-  background: #e5e5e5;
+  background: #FFFFFF;
+  box-shadow: 0 0 0 1px #737373;
 }
 button:focus-visible,
 summary:focus-visible,
@@ -303,7 +304,7 @@ summary:focus-visible,
   margin: 0 2px;
   padding: 0 4px;
   border-radius: 4px;
-  background: #f3eaf9;
+  background: #FFFFFF;
   color: #67417f;
   font-size: 11px;
   line-height: 20px;
@@ -311,7 +312,7 @@ summary:focus-visible,
   cursor: pointer;
 }
 .prompt-chip.broken {
-  background: #fef2f2;
+  background: #FFFFFF;
   color: var(--wire-error);
 }
 .prompt-chip[data-highlighted="true"],
@@ -335,6 +336,13 @@ summary:focus-visible,
   height: 18px;
 }
 
-.design-card[data-state="result"] .prompt-anchor { border-color: transparent; background: transparent; }
+.design-card[data-state="result"] .prompt-anchor { border-color: transparent; background: #FFFFFF; }
 .design-card[data-state="result"] .prompt-editor { min-height: 0; padding: 4px 0; color: #525252; }
-.design-card[data-state="running"] .prompt-anchor { background: #fafafa; opacity: .8; }
+.design-card[data-state="running"] .prompt-anchor { background: #FFFFFF; }
+
+.node-title::placeholder { color: transparent; }
+.node-header:hover .node-title::placeholder,
+.node-header:focus-within .node-title::placeholder { color: #a3a3a3; }
+.prompt-editor { background: #FFFFFF; }
+
+.wire-badge.unnumbered:not(.active):not(:focus-visible) { opacity: 0 !important; }

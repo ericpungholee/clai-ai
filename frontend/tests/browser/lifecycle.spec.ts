@@ -16,7 +16,7 @@ test("missing and deleted reference sources surface immediately with recovery", 
   await draft(page, "target").press("@");
   await page
     .getByRole("dialog")
-    .getByRole("button", { name: "Untitled node", exact: true })
+    .getByRole("button", { name: "Image", exact: true })
     .click();
   await expect(card(page, "target").getByRole("alert")).toContainText(
     "Reference has no image — run its source first.",

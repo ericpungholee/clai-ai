@@ -1,6 +1,5 @@
 import type { Project } from "@/lib/projects";
 
-import { NewProjectButton } from "./new-project-button";
 import { ProjectTile } from "./project-tile";
 
 type ProjectGridProps = {
@@ -14,11 +13,6 @@ export function ProjectGrid({ projects }: ProjectGridProps) {
         <h2 className="text-base font-medium text-foreground">
           No projects yet
         </h2>
-        <p className="mt-1.5 mb-5 text-sm text-muted">
-          Create a project, describe one product, then branch from an image to
-          explore changes without losing the original.
-        </p>
-        <NewProjectButton />
       </div>
     );
   }

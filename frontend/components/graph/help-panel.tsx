@@ -10,8 +10,8 @@ const invariants = [
 ];
 const shortcuts = [
   ["N", "New node"],
-  ["B", "Continue editing"],
-  ["Cmd/Ctrl+D", "Try another (result) / Duplicate draft"],
+  ["B", "New connected node"],
+  ["Cmd/Ctrl+D", "Duplicate draft"],
   ["Cmd/Ctrl+Enter", "Run"],
   ["@", "Add a reference"],
   ["F", "Frame whole graph"],

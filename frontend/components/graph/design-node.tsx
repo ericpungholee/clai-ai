@@ -27,19 +27,17 @@ export const DesignNode = memo(function DesignNode({
   const result = data.versions.length > 0;
   const running = data.run.status === "running";
   const locked = result || running;
-  const [plain, setPlain] = useState(false);
   const hasSubject = !!data.subject;
   const meshPreview =
     data.meshPreview?.versionId === activeVersion?.id ? data.meshPreview : null;
   const showMesh = !!meshPreview && data.previewMode !== "image";
-  const preview = showMesh
-    ? meshPreview.url
-    : (activeVersion?.artifact_url ?? data.subject?.artifactUrl);
+  const preview = showMesh ? meshPreview.url : activeVersion?.artifact_url;
   const blocked = runBlockingReason(data);
+  const visibleWarning = blocked === "Enter a prompt." ? null : blocked;
   const failed = data.run.status === "failed";
   const warning =
     !result && !running
-      ? (blocked ??
+      ? (visibleWarning ??
         (failed
           ? data.run.status === "failed"
             ? data.run.message
@@ -65,7 +63,8 @@ export const DesignNode = memo(function DesignNode({
         <input
           aria-label="Node title"
           title={data.title}
-          className="nodrag w-full truncate bg-transparent text-xs font-semibold text-neutral-700 outline-none"
+          placeholder="Name this node"
+          className="node-title nodrag w-full truncate bg-transparent text-xs font-semibold text-neutral-700 outline-none"
           maxLength={120}
           onChange={(e) => actions.updateTitle(id, e.target.value)}
           onKeyDown={(e) => e.stopPropagation()}
@@ -82,29 +81,17 @@ export const DesignNode = memo(function DesignNode({
               </button>
             ) : null}
             <button onClick={() => actions.deleteNode(id)}>Delete node</button>
-            {data.subject?.deleted && !locked ? (
-              <button onClick={() => actions.disconnectSubject(id)}>
-                Disconnect input
-              </button>
-            ) : null}
           </OverflowMenu>
         </>
       }
     >
-      <span className="text-[10px] text-neutral-500">
-        {result ? "Result" : running ? "Running" : failed ? "Failed" : "Draft"}
-      </span>
       {preview ? (
-        <div className="image-preview group relative overflow-hidden rounded-md bg-neutral-100">
+        <div className="image-preview group relative overflow-hidden rounded-md bg-white">
           <button
             className="nodrag block w-full cursor-zoom-in"
-            aria-label={result ? "Inspect result" : "Inspect input image"}
+            aria-label="Inspect result"
             onClick={() =>
-              showMesh && activeVersion
-                ? actions.viewMesh(activeVersion.id)
-                : actions.viewVersions([
-                    activeVersion?.id ?? data.subject!.versionId,
-                  ])
+              actions.viewVersions([activeVersion!.id])
             }
           >
             <ArtifactImage
@@ -113,14 +100,14 @@ export const DesignNode = memo(function DesignNode({
               src={preview}
             />
           </button>
-          {data.mask && !showMesh && !plain && !stale ? (
+          {data.mask && !showMesh && !stale ? (
             <MaskOutline mask={data.mask} />
           ) : null}
           {meshPreview ? (
             <div
               role="group"
               aria-label="Image view"
-              className="absolute right-2 top-2 flex rounded bg-white/95"
+              className="absolute right-2 top-2 flex rounded bg-white"
             >
               <IconButton
                 icon="image"
@@ -139,44 +126,17 @@ export const DesignNode = memo(function DesignNode({
           {activeVersion && activeVersion.edit_depth >= 2 ? (
             <button
               aria-label="Collapse chain"
-              className="nodrag absolute left-2 top-2 rounded bg-white/95 px-1.5 py-0.5 text-[10px]"
+              className="nodrag absolute left-2 top-2 rounded bg-white px-1.5 py-0.5 text-[10px]"
               onClick={() => actions.collapseVersion(activeVersion.id)}
             >
               {activeVersion.edit_depth} edits
             </button>
           ) : null}
           <div
-            className="preview-toolbar absolute inset-x-0 bottom-0 flex justify-end gap-1 bg-white/95 px-1.5 py-1"
+            className="preview-toolbar absolute inset-x-0 bottom-0 flex justify-end gap-1 bg-white px-1.5 py-1"
             role="toolbar"
             aria-label="Image actions"
           >
-            <IconButton
-              icon="inspect"
-              label="Inspect"
-              onClick={() =>
-                actions.viewVersions([
-                  activeVersion?.id ?? data.subject!.versionId,
-                ])
-              }
-            />
-            {data.mask && !result ? (
-              <IconButton
-                icon="image"
-                label={plain ? "Show area selection" : "Show plain input"}
-                aria-pressed={plain}
-                onClick={() => setPlain(!plain)}
-              />
-            ) : null}
-            {hasSubject && !locked ? (
-              <IconButton
-                icon="mask"
-                label={data.mask ? "Edit area" : "Select area"}
-                onClick={() => {
-                  setPlain(false);
-                  actions.editMask(id);
-                }}
-              />
-            ) : null}
             {activeVersion ? (
               <IconButton
                 icon="mesh"
@@ -195,7 +155,7 @@ export const DesignNode = memo(function DesignNode({
             : `${(preservation * 100).toFixed(2)}% changed.`}
         </p>
       ) : null}
-      <SubjectRow id={id} data={data} />
+      <SubjectRow id={id} data={data} locked={locked} />
       {!result ? (
         <div
           className="nowheel h-16 overflow-y-auto text-[10px] text-red-700"
@@ -293,36 +253,21 @@ export const DesignNode = memo(function DesignNode({
             ? "Describe the change inside the selection…"
             : hasSubject
               ? "Describe a change…"
-              : "Describe an object…"
+              : "Describe a design…"
         }
         footer={
           data.run.status === "running" ? (
             <RunProgress run={data.run} />
-          ) : result ? null : (
-            <>
-              {!hasSubject ? (
-                <IconButton
-                  icon="background"
-                  label="White bg"
-                  aria-pressed={data.settings.whiteBackground}
-                  onClick={() =>
-                    actions.updateWhiteBackground(
-                      id,
-                      !data.settings.whiteBackground,
-                    )
-                  }
-                />
-              ) : null}
-              <button
-                className="nodrag rounded bg-neutral-900 px-3 py-1 text-xs font-semibold text-white disabled:bg-neutral-300"
-                disabled={!!blocked}
-                title={blocked ?? "Run"}
-                onClick={run}
-              >
-                {failed ? "Retry" : "Run"}
-              </button>
-            </>
-          )
+          ) : !result ? (
+            <button
+              className="nodrag rounded bg-neutral-900 px-3 py-1 text-xs font-semibold text-white disabled:bg-neutral-300"
+              disabled={!!blocked}
+              title={blocked ?? "Run"}
+              onClick={run}
+            >
+              {failed ? "Retry" : "Run"}
+            </button>
+          ) : null
         }
       />
       {result ? (
@@ -331,19 +276,7 @@ export const DesignNode = memo(function DesignNode({
             className="w-full rounded bg-neutral-900 px-3 py-2 text-xs font-semibold text-white"
             onClick={() => actions.branchVersion(id, activeVersion.id)}
           >
-            Continue editing
-          </button>
-          <button
-            className="text-xs text-neutral-600"
-            onClick={() => actions.reviseNode(id, true)}
-          >
-            Try another
-          </button>
-          <button
-            className="ml-auto text-xs text-neutral-600"
-            onClick={() => actions.reviseNode(id)}
-          >
-            Revise prompt
+            New node
           </button>
         </div>
       ) : null}
@@ -371,7 +304,15 @@ function ArtifactImage({
   return <img alt={alt} className={className} draggable={false} src={src} />;
 }
 
-function SubjectRow({ id, data }: { id: string; data: DesignNodeData }) {
+function SubjectRow({
+  id,
+  data,
+  locked,
+}: {
+  id: string;
+  data: DesignNodeData;
+  locked: boolean;
+}) {
   const actions = useDesignNodeActions();
   const [retained, setRetained] = useState(data.subject);
   if (data.subject && retained !== data.subject) setRetained(data.subject);
@@ -387,35 +328,46 @@ function SubjectRow({ id, data }: { id: string; data: DesignNodeData }) {
         <NodeHandle data={data} id={id} role="subject" type="target" />
       ) : null}
       {subject ? (
-        <button
-          className={`nodrag subject-chip flex h-6 w-full items-center gap-2 rounded-r pl-6 pr-1 text-left ${subject.deleted ? "opacity-50" : ""}`}
-          aria-label={`Inspect ${subject.nodeTitle}`}
-          title={
-            subject.deleted
-              ? "Source node deleted. This image is retained and still usable."
-              : subject.nodeTitle
-          }
-          onClick={() => actions.viewVersions([subject.versionId])}
-          onMouseEnter={() => actions.hoverWire(subject.edgeId)}
-          onMouseLeave={() => actions.hoverWire(null)}
-          onFocus={() => actions.hoverWire(subject.edgeId)}
-          onBlur={() => actions.hoverWire(null)}
+        <div
+          className={`nodrag subject-chip flex h-6 w-full items-center rounded-r pl-6 pr-0.5 ${subject.deleted ? "opacity-50" : ""}`}
           data-highlighted={
             data.highlightedWireId === subject.edgeId || undefined
           }
         >
-          <span className="wire-number subject-number">1</span>
-          <ArtifactImage
-            alt=""
-            className="h-5 w-5 shrink-0 rounded object-cover"
-            src={subject.artifactUrl}
-          />
-          <span
-            className={`truncate text-xs text-neutral-600 ${subject.deleted ? "line-through" : ""}`}
+          {data.connects.length > 0 ? <span className="wire-number subject-number">1</span> : null}
+          <button
+            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            aria-label={`Inspect ${subject.nodeTitle}`}
+            title={
+              subject.deleted
+                ? "Source node deleted. This image is retained and still usable."
+                : subject.nodeTitle
+            }
+            onClick={() => actions.viewVersions([subject.versionId])}
+            onMouseEnter={() => actions.hoverWire(subject.edgeId)}
+            onMouseLeave={() => actions.hoverWire(null)}
+            onFocus={() => actions.hoverWire(subject.edgeId)}
+            onBlur={() => actions.hoverWire(null)}
           >
-            {subject.nodeTitle}
-          </span>
-        </button>
+            <ArtifactImage
+              alt=""
+              className="h-5 w-5 shrink-0 rounded object-cover"
+              src={subject.artifactUrl}
+            />
+            <span
+              className={`truncate text-xs text-neutral-600 ${subject.deleted ? "line-through" : ""}`}
+            >
+              {subject.nodeTitle}
+            </span>
+          </button>
+          {!locked ? (
+            <IconButton
+              icon="mask"
+              label={data.mask ? "Edit area" : "Select area"}
+              onClick={() => actions.editMask(id)}
+            />
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

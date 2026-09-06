@@ -93,19 +93,25 @@ export function MeshViewer({
     <dialog
       ref={dialog}
       onCancel={onClose}
-      className="m-auto flex h-[85vh] w-[85vw] max-w-6xl flex-col rounded-xl bg-neutral-50 p-5 backdrop:bg-black/60"
+      className="m-auto flex h-[85vh] w-[85vw] max-w-6xl flex-col rounded-xl bg-white p-5 backdrop:bg-black/60"
     >
       <header className="flex justify-between">
         <h2 className="font-semibold">
-          3D view · {mesh?.texture === "no" ? "shape only" : "color & design"}
+          3D view
         </h2>
-        <button onClick={onClose}>Back to canvas · Esc</button>
+        <button onClick={onClose}>Close</button>
       </header>
-      <p className="mt-2 rounded bg-amber-50 p-3 text-sm text-amber-900">
-        The rear and hidden sides are inferred. Colors and printed details are
-        reconstructed from the 2D image and may vary.
-      </p>
-      <main className="relative mt-4 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-lg bg-neutral-200">
+      <div className="mt-2 flex gap-2 text-sm text-neutral-600">
+        Hidden sides are inferred and may vary.
+        <details className="relative">
+          <summary aria-label="About inferred details" className="cursor-pointer list-none">ⓘ</summary>
+          <p className="absolute right-0 z-10 w-72 rounded border bg-white p-3 shadow-md">
+            The rear and hidden sides are inferred. Colors and printed details are
+            reconstructed from the 2D image and may vary.
+          </p>
+        </details>
+      </div>
+      <main className="relative mt-4 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-lg bg-white">
         {mesh?.status === "complete" ? (
           <>
             <GlbView key={mesh.attempt_id} mesh={mesh} />
@@ -130,13 +136,12 @@ export function MeshViewer({
                   {mesh.status === "queued"
                     ? "Queued"
                     : mesh.status === "ingesting"
-                      ? "Saving the mesh and preview"
-                      : "Generating 3D shape, colors and print"}{" "}
-                  · {seconds}s in this view
+                      ? "Saving"
+                      : "Generating"}{" "}
+                  · {seconds}s
                 </p>
                 <p className="mt-2 text-sm text-neutral-600">
-                  This is slower than an image edit. You can close this view;
-                  the job keeps running.
+                  Safe to close — this keeps running.
                 </p>
               </div>
             ) : state.status === "loading" || state.status === "submitting" ? (
@@ -152,20 +157,12 @@ export function MeshViewer({
                     {state.status === "error" ? state.message : mesh?.error}
                   </p>
                 ) : null}
-                <p className="mb-3 text-sm">
-                  Create a 3D view from this exact 2D image, including its
-                  colors and printed design. Generation can take a few minutes;
-                  the finished view is saved for this image.
-                </p>
                 <button
                   onClick={create}
                   className="mt-4 rounded bg-neutral-900 px-4 py-2 text-sm text-white"
                 >
                   {mesh?.status === "failed" ? "Retry" : "Generate"} 3D
                 </button>
-                <p className="mt-2 text-xs text-neutral-500">
-                  Colors and print included.
-                </p>
               </div>
             )}
           </>
@@ -184,15 +181,6 @@ export function MeshViewer({
             Generate with colors & print
           </button>
         </div>
-      ) : null}
-      {mesh?.status === "complete" ? (
-        <p className="mt-2 text-xs text-neutral-500">
-          Saved for this image.{" "}
-          {mesh.elapsed_seconds !== null
-            ? `Generated and saved in ${Math.round(mesh.elapsed_seconds)}s.`
-            : ""}{" "}
-          Drag to rotate; scroll to zoom.
-        </p>
       ) : null}
     </dialog>
   );

@@ -222,8 +222,7 @@ export function MaskEditor({
             Select an area of {subject.nodeTitle}
           </h2>
           <p className="text-xs text-neutral-500">
-            Orange areas change. The surrounding image is preserved with a 3px
-            blended seam.
+            Orange areas change.
           </p>
         </div>
         <button

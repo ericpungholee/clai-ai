@@ -37,7 +37,7 @@ test("a fifty-node canvas supports fit, new-node and duplicate shortcuts", async
       .getByRole("textbox", { name: "Node title" })
       .filter({ visible: true })
       .last(),
-  ).toHaveValue("Untitled node");
+  ).toHaveValue("");
   await page.keyboard.press("Control+d");
   await expect
     .poll(
@@ -56,7 +56,7 @@ test("a fifty-node canvas supports fit, new-node and duplicate shortcuts", async
       .getByRole("textbox", { name: "Node title" })
       .filter({ visible: true })
       .last(),
-  ).toHaveValue("Untitled node · copy");
+  ).toHaveValue("");
 });
 
 test("home rename/delete and a new project's empty canvas are usable", async ({
@@ -80,6 +80,12 @@ test("home rename/delete and a new project's empty canvas are usable", async ({
   await expect(
     page.getByRole("textbox", { name: "Design prompt" }),
   ).toHaveCount(1);
+  await expect(
+    page.getByRole("textbox", { name: "Design prompt" }),
+  ).toHaveAttribute("data-placeholder", "Describe a design…");
+  await expect(page.getByText("Enter a prompt.", { exact: true })).toHaveCount(
+    0,
+  );
 });
 
 test("running locks a draft, success freezes it, and failure allows retry", async ({
@@ -100,7 +106,7 @@ test("running locks a draft, success freezes it, and failure allows retry", asyn
   await node.getByRole("button", { name: "Retry", exact: true }).click();
   await request.post("http://127.0.0.1:8109/finish-run");
   await expect(
-    node.getByRole("button", { name: "Continue editing" }),
+    node.getByRole("button", { name: "New node" }),
   ).toBeVisible();
   await expect(editor).toHaveText("A corrected instruction");
   await expect(editor).toHaveAttribute("contenteditable", "false");
@@ -196,16 +202,16 @@ test("deleting an unsaved draft cancels its save and leaves no phantom changes",
   await expect(page).toHaveURL("http://127.0.0.1:3009/");
 });
 
-test("forward actions keep their inputs, direction, submission and focus distinct", async ({
+test("New node creates a connected draft and focuses it", async ({
   page,
   request,
 }) => {
   await page.goto("/projects/fixture-project");
   await card(page, "source")
-    .getByRole("button", { name: "Continue editing", exact: true })
+    .getByRole("button", { name: "New node", exact: true })
     .click();
   await expect(page.locator(".react-flow__node")).toHaveCount(3);
-  let state = await graph(request);
+  const state = await graph(request);
   const continued = state.nodes.at(-1);
   expect(continued.position.x).toBeGreaterThan(state.nodes[0].position.x);
   expect(continued.position.y).toBe(state.nodes[0].position.y);
@@ -218,44 +224,19 @@ test("forward actions keep their inputs, direction, submission and focus distinc
     ).pin.version_id,
   ).toBe("subject");
   await expect(draft(page, continued.id)).toBeFocused();
-  await page.reload();
-  await card(page, "source")
-    .getByRole("button", { name: "Revise prompt", exact: true })
-    .click();
-  await expect.poll(async () => (await graph(request)).nodes.length).toBe(4);
-  state = await graph(request);
-  const revised = state.nodes.at(-1);
-  expect(revised.position.x).toBe(state.nodes[0].position.x);
-  expect(revised.position.y).toBeGreaterThan(state.nodes[0].position.y);
-  expect(revised.prompt).toBe(state.nodes[0].prompt);
-  expect(revised.run).toBeNull();
-  expect(
-    state.edges.some(
-      (edge: { target_node_id: string }) => edge.target_node_id === revised.id,
-    ),
-  ).toBe(false);
-  await expect(draft(page, revised.id)).toBeFocused();
-  await page.reload();
-  await card(page, "source")
-    .getByRole("button", { name: "Try another", exact: true })
-    .click();
-  await expect
-    .poll(async () => (await graph(request)).nodes.at(-1).run?.status)
-    .toBe("queued");
-  state = await graph(request);
-  const another = state.nodes.at(-1);
-  expect(another.position.x).toBe(state.nodes[0].position.x);
-  expect(another.position.y).toBeGreaterThan(revised.position.y);
-  expect(another.prompt).toBe(state.nodes[0].prompt);
-  await request.post(`${api}/finish-run`);
-  await expect(
-    card(page, another.id).getByRole("button", { name: "Continue editing" }),
-  ).toBeVisible();
-  state = await graph(request);
-  expect(state.nodes.at(-1).versions[0].seed).not.toBe(
-    state.nodes[0].versions[0].seed,
+  await expect(card(page, continued.id).locator(".image-preview")).toHaveCount(
+    0,
   );
-  expect(state.nodes[0].versions).toHaveLength(1);
+  await expect(
+    card(page, continued.id).getByRole("button", { name: "White bg" }),
+  ).toHaveCount(0);
+  await expect(
+    card(page, continued.id).getByRole("button", {
+      name: "Inspect Desk lamp",
+    }),
+  ).toBeVisible();
+
+  await expect(card(page, "source").getByRole("button", { name: /Try another|Revise prompt/ })).toHaveCount(0);
 });
 
 test("canvas comparison appears only for exactly two image nodes", async ({
@@ -305,7 +286,7 @@ test("ten continued images form a row and F frames the whole chain", async ({
   const positions = [(await graph(request)).nodes[0].position];
   for (let i = 1; i < 10; i++) {
     await card(page, id)
-      .getByRole("button", { name: "Continue editing", exact: true })
+      .getByRole("button", { name: "New node", exact: true })
       .click();
     await expect
       .poll(async () => (await graph(request)).nodes.length)
@@ -323,7 +304,7 @@ test("ten continued images form a row and F frames the whole chain", async ({
       .toBe("queued");
     await request.post(`${api}/finish-run`);
     await expect(
-      card(page, id).getByRole("button", { name: "Continue editing" }),
+      card(page, id).getByRole("button", { name: "New node" }),
     ).toBeVisible();
   }
   for (let i = 1; i < positions.length; i++) {

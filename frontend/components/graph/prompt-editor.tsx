@@ -155,7 +155,9 @@ export function PromptEditor({
       badge.textContent = String(number);
       const name = window.document.createElement("span");
       name.textContent = `@${label.length > 18 ? `${label.slice(0, 18)}…` : label}`;
-      chip.replaceChildren(badge, name);
+      chip.replaceChildren(
+        ...(connects.length + Number(hasSubject) > 1 ? [badge, name] : [name]),
+      );
       chip.className = `prompt-chip ${ref?.state === "deleted" ? "broken" : ""}`;
       chip.dataset.highlighted = String(
         highlightedWireId === chip.dataset.edgeId,
@@ -377,7 +379,7 @@ export function PromptEditor({
               <button
                 key={candidate.id}
                 type="button"
-                className="block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-purple-50"
+                className="block w-full truncate rounded px-2 py-1 text-left text-xs hover:shadow-sm"
                 onClick={() => insert(candidate)}
               >
                 {candidate.title}

@@ -406,11 +406,10 @@ def duplicate_node(
     )
     if source is None:
         raise HTTPException(404, "Node not found")
-    data.title = f"{source.title[:113]} · copy"
     data.settings = NodeSettingsData.model_validate(
         {
             **source.settings,
-            "whiteBackground": source.settings.get("whiteBackground", False),
+            "whiteBackground": source.settings.get("whiteBackground", True),
         }
     )
     data.seed = secrets.randbits(32) if data.fresh_seed else source.seed

@@ -2,7 +2,8 @@ from app.domain.runs import Op
 
 PRESERVATION_PREAMBLE = (
     "This is an edit of the attached image. Keep the same object and the same\n"
-    "photograph: same camera angle, same framing, same background.\n"
+    "photograph: same camera angle and same framing.\n"
+    "{background_instruction}"
     "Keep every attribute the instruction does not mention.\n"
     "The instruction may change any attribute it names, including form,\n"
     "proportions, colour, material, and finish. Apply it fully.\n\n"
@@ -19,7 +20,7 @@ EDIT_OPS = frozenset(
 )
 
 GENERATE_OPS = frozenset({Op.GENERATE, Op.GENERATE_REF})
-WHITE_BACKGROUND_CLAUSE = "Place the object on a clean white background."
+WHITE_BACKGROUND_CLAUSE = "Place the object on a plain pure white background."
 
 
 class PromptBuildError(ValueError):
@@ -31,7 +32,15 @@ def build_prompt(*, user_prompt: str, op: Op, white_background: bool = True) -> 
     if not resolved_prompt:
         raise PromptBuildError("A run prompt cannot be empty")
     if op in EDIT_OPS:
-        return PRESERVATION_PREAMBLE.format(resolved_user_prompt=resolved_prompt)
+        prompt = PRESERVATION_PREAMBLE.format(
+            background_instruction=""
+            if white_background
+            else "Keep the same background.\n",
+            resolved_user_prompt=resolved_prompt,
+        )
+        if white_background and op != Op.EDIT_INPAINT:
+            return f"{prompt}\n\nThe background must be plain pure white."
+        return prompt
     if op in GENERATE_OPS and white_background:
         return f"{resolved_prompt}\n\n{WHITE_BACKGROUND_CLAUSE}"
     return resolved_prompt

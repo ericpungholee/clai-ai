@@ -10,8 +10,9 @@ test("rectangle, brush, lasso, undo, empty selection and version binding", async
   request,
 }) => {
   await page.goto("/projects/fixture-project");
-  await page.locator('[data-id="target"] .image-preview').hover();
-  await page.getByRole("button", { name: "Select area" }).click();
+  await card(page, "target")
+    .getByRole("button", { name: "Select area", exact: true })
+    .click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await dialog
@@ -61,13 +62,12 @@ test("rectangle, brush, lasso, undo, empty selection and version binding", async
   ).toBeDisabled();
 });
 
-test("saving an area arms the input preview and prevents references", async ({
+test("saving an area keeps the draft empty and prevents references", async ({
   page,
   request,
 }) => {
   await page.goto("/projects/fixture-project");
   await draft(page, "target").fill("");
-  await card(page, "target").locator(".image-preview").hover();
   await card(page, "target")
     .getByRole("button", { name: "Select area", exact: true })
     .click();
@@ -86,12 +86,13 @@ test("saving an area arms the input preview and prevents references", async ({
       "Area saved. Describe the change, then Run.",
     ),
   ).toBeVisible();
+  await expect(card(page, "target").locator(".image-preview")).toHaveCount(0);
   await expect(
-    card(page, "target").getByLabel("Saved area selection"),
+    card(page, "target").getByRole("button", {
+      name: "Edit area",
+      exact: true,
+    }),
   ).toBeVisible();
-  await expect(
-    card(page, "target").locator(".image-preview img"),
-  ).toHaveAttribute("src", /subject.svg/);
   expect((await graph(request)).nodes[1].run).toBeNull();
   await draft(page, "target").press("@");
   const picker = page.getByRole("dialog", { name: "Add a reference" });
@@ -132,7 +133,6 @@ test("references block area saving, and selection text counts while typing", asy
   await draft(page, "target").click();
   await draft(page, "target").press("@");
   await page.getByRole("button", { name: "Desk lamp", exact: true }).click();
-  await card(page, "target").locator(".image-preview").hover();
   await card(page, "target")
     .getByRole("button", { name: "Select area", exact: true })
     .click();
@@ -159,7 +159,6 @@ test("whole-image selection explains its meaning while painting", async ({
   page,
 }) => {
   await page.goto("/projects/fixture-project");
-  await card(page, "target").locator(".image-preview").hover();
   await card(page, "target")
     .getByRole("button", { name: "Select area", exact: true })
     .click();

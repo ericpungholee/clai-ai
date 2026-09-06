@@ -53,8 +53,7 @@ def submit_run(
 
     if db.scalar(select(Version.id).where(Version.node_id == node_id).limit(1)):
         raise ResultRunError(
-            "This node already has an image. Continue editing, Try "
-            "another, or Revise prompt to make a new node."
+            "This node already has an image. Continue editing to make a new node."
         )
 
     # A response can be lost after enqueue, or another tab can still show Run.
@@ -241,7 +240,7 @@ def _node_snapshot(node: GraphNode) -> NodeSnapshot:
             width=_setting_integer(settings, "width"),
             height=_setting_integer(settings, "height"),
             white_background=_setting_boolean(
-                settings, "whiteBackground", default=False
+                settings, "whiteBackground", default=True
             ),
         ),
         seed=node.seed,

@@ -272,11 +272,11 @@ def test_seed_precedence_is_override_then_subject_then_random() -> None:
 def test_edit_prompt_uses_the_accepted_preamble_exactly() -> None:
     assert build_prompt(user_prompt="  make it navy  ", op=Op.EDIT_INSTRUCT) == (
         "This is an edit of the attached image. Keep the same object and the same\n"
-        "photograph: same camera angle, same framing, same background.\n"
+        "photograph: same camera angle and same framing.\n"
         "Keep every attribute the instruction does not mention.\n"
         "The instruction may change any attribute it names, including form,\n"
         "proportions, colour, material, and finish. Apply it fully.\n\n"
-        "Instruction: make it navy"
+        "Instruction: make it navy\n\nThe background must be plain pure white."
     )
     assert "{resolved_user_prompt}" in PRESERVATION_PREAMBLE
 
@@ -284,9 +284,11 @@ def test_edit_prompt_uses_the_accepted_preamble_exactly() -> None:
 @pytest.mark.parametrize("op", [Op.GENERATE, Op.GENERATE_REF])
 def test_generate_prompt_appends_white_background_clause(op: Op) -> None:
     assert build_prompt(user_prompt="  a navy shoe  ", op=op) == (
-        "a navy shoe\n\nPlace the object on a clean white background."
+        "a navy shoe\n\nPlace the object on a plain pure white background."
     )
-    assert WHITE_BACKGROUND_CLAUSE == "Place the object on a clean white background."
+    assert (
+        WHITE_BACKGROUND_CLAUSE == "Place the object on a plain pure white background."
+    )
 
 
 @pytest.mark.parametrize("op", [Op.GENERATE, Op.GENERATE_REF])
@@ -300,13 +302,19 @@ def test_generate_prompt_omits_white_background_clause_when_disabled(op: Op) -> 
 @pytest.mark.parametrize(
     "op", [Op.EDIT_INSTRUCT, Op.EDIT_INPAINT, Op.EDIT_COMPOSITE, Op.EDIT_REF_GUIDED]
 )
-def test_edit_prompt_never_receives_white_background_clause(op: Op) -> None:
-    prompt = build_prompt(
-        user_prompt="make it navy",
-        op=op,
-        white_background=True,
+def test_edit_prompt_respects_white_background_setting(op: Op) -> None:
+    white_prompt = build_prompt(
+        user_prompt="make it navy", op=op, white_background=True
     )
-    assert WHITE_BACKGROUND_CLAUSE not in prompt
+    preserved_prompt = build_prompt(
+        user_prompt="make it navy", op=op, white_background=False
+    )
+    assert ("The background must be plain pure white." in white_prompt) == (
+        op != Op.EDIT_INPAINT
+    )
+    assert "Keep the same background." not in white_prompt
+    assert "plain pure white" not in preserved_prompt
+    assert "Keep the same background." in preserved_prompt
 
 
 def test_frozen_request_contains_only_resolved_artifacts_and_target_prompt() -> None:
@@ -392,35 +400,3 @@ def test_valid_mask_is_hashed_into_frozen_provenance() -> None:
     assert request.op is Op.EDIT_INPAINT
     assert request.input_snapshot.mask_hash is not None
     assert len(request.input_snapshot.mask_hash) == 64
-
-
-def test_auto_title_uses_chip_source_title_instead_of_runtime_image_number() -> None:
-    from app.services.run_execution import auto_node_title
-
-    assert (
-        auto_node_title(
-            [
-                {"type": "connect", "edge_id": "reference", "source_node_id": "bottle"},
-                {"type": "text", "text": ". the cap should be same size"},
-            ],
-            {"bottle": "Bottle base"},
-        )
-        == "Bottle base. the cap should"
-    )
-
-
-@pytest.mark.parametrize(
-    ("prompt", "expected"),
-    [
-        ("image 2. the cap should be same size", "the cap should be same"),
-        ("Image 3: brass cap", "brass cap"),
-        ("image 2", "Untitled concept"),
-        ("image 2 image 3: cap", "Untitled concept"),
-        ("", "Untitled concept"),
-        ("a" * 80, "a" * 60),
-    ],
-)
-def test_auto_title_strips_placeholders_and_limits_length(prompt, expected) -> None:
-    from app.services.run_execution import auto_node_title
-
-    assert auto_node_title([{"type": "text", "text": prompt}], {}) == expected

@@ -21,9 +21,9 @@ test("3D uses image textures by default and caches only its exact image version"
   await source.getByRole("button", { name: "3D", exact: true }).click();
   await expect(
     page.getByText("Colors and print included.", { exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(
-    page.getByText("The rear and hidden sides are inferred", { exact: false }),
+    page.getByText("Hidden sides are inferred and may vary.", { exact: false }),
   ).toBeVisible();
   expect(submissions).toBe(0);
   await page.getByRole("button", { name: "Generate 3D" }).click();
@@ -52,7 +52,7 @@ test("3D uses image textures by default and caches only its exact image version"
   await source.locator(".image-preview").hover();
   await source.getByRole("button", { name: "3D", exact: true }).click();
   await expect(
-    page.getByText("Saved for this image.", { exact: false }),
+    page.getByRole("heading", { name: "3D view", exact: true }),
   ).toBeVisible();
   expect(submissions).toBe(1);
   await page.keyboard.press("Escape");
@@ -115,7 +115,7 @@ test("a cached grey model can be regenerated with image colors and print", async
   await source.locator(".image-preview").hover();
   await source.getByRole("button", { name: "3D", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "3D view · color & design" }),
+    page.getByRole("heading", { name: "3D view" }),
   ).toBeVisible();
   await expect(upgrade).toHaveCount(0);
   expect(submissions).toBe(1);

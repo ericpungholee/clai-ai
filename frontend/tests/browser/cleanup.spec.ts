@@ -152,7 +152,7 @@ test("removing a reference updates the document and renumbers before autosave", 
     "2",
   );
   await expect(
-    node(page).getByRole("button", { name: "Image 2: Untitled node" }),
+    node(page).getByRole("button", { name: "Image 2: Image" }),
   ).toBeVisible();
   expect(
     (await (await request.get(graphUrl)).json()).nodes[1].document.filter(
@@ -206,7 +206,7 @@ test("disconnect confirms a saved mask, clears it and changes to origin", async 
   );
   await expect(
     node(page).getByRole("button", { name: "White bg" }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(
     node(page).getByRole("button", { name: "Edit area" }),
   ).toHaveCount(0);

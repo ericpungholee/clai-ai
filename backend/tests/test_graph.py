@@ -1,5 +1,6 @@
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -172,7 +173,7 @@ def test_white_background_defaults_for_new_nodes_and_freezes_per_version(
     )
     assert provider.requests[-1].settings.white_background is True
     assert provider.requests[-1].prompt_at_runtime.endswith(
-        "Place the object on a clean white background."
+        "Place the object on a plain pure white background."
     )
 
     node = client.post(
@@ -200,11 +201,11 @@ def test_white_background_defaults_for_new_nodes_and_freezes_per_version(
     assert versions[str(first_version_id)]["params"]["whiteBackground"] is True
     assert versions[str(second_version_id)]["params"]["whiteBackground"] is False
     assert versions[str(first_version_id)]["prompt_at_runtime"].endswith(
-        "Place the object on a clean white background."
+        "Place the object on a plain pure white background."
     )
 
 
-def test_legacy_node_without_white_background_remains_disabled(
+def test_legacy_node_without_white_background_uses_default(
     client: TestClient,
 ) -> None:
     project_id = create_project(client)
@@ -223,7 +224,7 @@ def test_legacy_node_without_white_background_remains_disabled(
         )
 
     graph_node = client.get(f"/api/projects/{project_id}/graph").json()["nodes"][0]
-    assert graph_node["settings"]["whiteBackground"] is False
+    assert graph_node["settings"]["whiteBackground"] is True
     with TestingSessionLocal() as db:
         stored_settings = db.get(GraphNode, node_id).settings
         assert "whiteBackground" not in stored_settings
@@ -378,7 +379,9 @@ def test_navy_shoe_acceptance_runs_real_pipeline_with_fake_provider(
         scorer=FakeDinoV2Scorer(),
     )
 
-    assert provider.requests[-1].prompt_at_runtime.endswith("Instruction: make it navy")
+    assert provider.requests[-1].prompt_at_runtime.endswith(
+        "Instruction: make it navy\n\nThe background must be plain pure white."
+    )
     assert provider.requests[-1].input_snapshot.subject_version_id == str(
         subject_version_id
     )
@@ -420,3 +423,43 @@ def test_commit_is_idempotent_at_version_boundary(client: TestClient) -> None:
 
     assert [version.id for version in versions] == [version_id]
     assert edges == []
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_three_edit_chain_inherits_background_and_keeps_titles_empty(client, enabled):
+    project = create_project(client)
+    node = client.post(
+        f"/api/projects/{project}/nodes",
+        json={
+            "position": {"x": 0, "y": 0},
+            "prompt": "A bottle",
+            "settings": {"whiteBackground": enabled},
+        },
+    ).json()
+    queue = CapturingEnqueuer()
+    app.dependency_overrides[get_run_enqueuer] = lambda: queue
+    provider = FakeProvider()
+    for hop in range(4):
+        assert node["title"] == ""
+        assert node["settings"]["whiteBackground"] is enabled
+        _, version_id = submit_and_execute(client, project, node["id"], queue, provider)
+        runtime = provider.requests[-1].prompt_at_runtime
+        assert provider.requests[-1].settings.white_background is enabled
+        if hop:
+            assert ("The background must be plain pure white." in runtime) is enabled
+            assert ("Keep the same background." in runtime) is not enabled
+        graph = client.get(f"/api/projects/{project}/graph").json()
+        assert all(item["title"] == "" for item in graph["nodes"])
+        if hop < 3:
+            response = client.post(
+                f"/api/projects/{project}/versions/{version_id}/branches",
+                json={
+                    "position": {"x": (hop + 1) * 380, "y": 0},
+                    "prompt": "Make the cap taller",
+                },
+            )
+            assert response.status_code == 201
+            node = response.json()["node"]
+    url = f"/api/projects/{project}/nodes/{node['id']}"
+    assert client.patch(url, json={"title": "My bottle"}).json()["title"] == "My bottle"
+    assert client.patch(url, json={"title": ""}).json()["title"] == ""

@@ -44,7 +44,7 @@ export function CollapseDialog({
     >
       <header className="flex justify-between gap-4">
         <h2 className="text-lg font-semibold">Collapse edit chain</h2>
-        <button onClick={onClose}>Close · Esc</button>
+        <button onClick={onClose}>Close</button>
       </header>
       <p className="my-3 text-sm text-neutral-600">
         A new node applies these instructions to the original input image in one

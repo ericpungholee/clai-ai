@@ -25,6 +25,7 @@ import {
 } from "react";
 
 import {
+  nodeLabel,
   createBranch,
   createDesignNode,
   deleteSubjectEdge,
@@ -597,7 +598,7 @@ export function GraphWorkspace({
             edgeId: part.edge_id,
             nodeId: part.source_node_id,
             title:
-              source?.data.title ??
+              (source ? nodeLabel(source.data) : undefined) ??
               current.data.connects.find((ref) => ref.edgeId === part.edge_id)
                 ?.title ??
               "Deleted reference",
@@ -627,6 +628,10 @@ export function GraphWorkspace({
 
   const updateTitle = useCallback(
     (nodeId: string, title: string) => {
+      const label = nodeLabel({
+        title,
+        prompt: nodesRef.current.find((node) => node.id === nodeId)?.data.prompt ?? "",
+      });
       const next = nodesRef.current.map((node) => ({
         ...node,
         data: {
@@ -634,16 +639,16 @@ export function GraphWorkspace({
           ...(node.id === nodeId ? { title } : {}),
           subject:
             node.data.subject?.nodeId === nodeId
-              ? { ...node.data.subject, nodeTitle: title }
+              ? { ...node.data.subject, nodeTitle: label }
               : node.data.subject,
           connects: node.data.connects.map((ref) =>
-            ref.nodeId === nodeId ? { ...ref, title } : ref,
+            ref.nodeId === nodeId ? { ...ref, title: label } : ref,
           ),
         },
       }));
       nodesRef.current = next;
       setNodes(next);
-      if (title.trim()) scheduleNodePatch(nodeId, { title });
+      scheduleNodePatch(nodeId, { title });
     },
     [scheduleNodePatch],
   );
@@ -1007,34 +1012,6 @@ export function GraphWorkspace({
     [projectId, refreshWorkspace, updateNodeData, persistNodePatch],
   );
 
-  const reviseNode = useCallback(
-    async (nodeId: string, submit = false) => {
-      const source = nodesRef.current.find((node) => node.id === nodeId);
-      if (!source?.data.versions.length) return;
-      try {
-        const created = await duplicateDesignNode(
-          projectId,
-          nodeId,
-          findAvailablePosition(
-            { x: source.position.x, y: source.position.y + 850 },
-            nodesRef.current,
-            "below",
-          ),
-          submit,
-        );
-        await refreshWorkspace();
-        focusNode(created.id);
-        if (submit) await runNode(created.id);
-        else focusPrompt(created.id);
-      } catch (error) {
-        setConnectionError(
-          error instanceof Error ? error.message : "Could not create draft",
-        );
-      }
-    },
-    [projectId, refreshWorkspace, focusNode, runNode],
-  );
-
   const actions = useMemo(
     () => ({
       updateTitle,
@@ -1042,7 +1019,6 @@ export function GraphWorkspace({
       selectVersion,
       branchVersion,
       runNode,
-      reviseNode,
       editMask: setMaskNodeId,
       removeMask: async (id: string) => {
         try {
@@ -1087,14 +1063,13 @@ export function GraphWorkspace({
       candidates: (id: string) =>
         nodesRef.current
           .filter((node) => node.id !== id)
-          .map((node) => ({ id: node.id, title: node.data.title })),
+          .map((node) => ({ id: node.id, title: nodeLabel(node.data) })),
       hoverWire: setHoveredWire,
       jumpNode: focusNode,
     }),
     [
       branchVersion,
       disconnectSubject,
-      reviseNode,
       runNode,
       selectVersion,
       updateTitle,
@@ -1140,9 +1115,7 @@ export function GraphWorkspace({
       selected
     ) {
       event.preventDefault();
-      void (selected.data.versions.length
-        ? reviseNode(selected.id, true)
-        : duplicateNode(selected.id));
+      if (!selected.data.versions.length) void duplicateNode(selected.id);
     }
     if (
       event.key.toLowerCase() === "b" &&
@@ -1212,7 +1185,7 @@ export function GraphWorkspace({
           <ImageViewer
             versions={viewedVersions}
             nodeNames={Object.fromEntries(
-              nodes.map((node) => [node.id, node.data.title]),
+              nodes.map((node) => [node.id, nodeLabel(node.data)]),
             )}
             onClose={() => setViewedVersions([])}
           />
@@ -1235,7 +1208,6 @@ export function GraphWorkspace({
                 throw new Error("The source is no longer on this canvas.");
               const branch = await createBranch(projectId, rootId, {
                 id: crypto.randomUUID(),
-                title: `${source.data.title.slice(0, 100)} · collapsed`,
                 prompt: instruction,
                 position: findAvailablePosition(
                   { x: source.position.x + 500, y: source.position.y },
@@ -1418,8 +1390,8 @@ export function GraphWorkspace({
                 ).length;
                 if (count || dependents)
                   message = dependents
-                    ? `Delete "${node.data.title}"? Its ${count} ${count === 1 ? "image stays" : "images stay"} available to the ${dependents} ${dependents === 1 ? "node" : "nodes"} using them.`
-                    : `Delete "${node.data.title}"? Its ${count} ${count === 1 ? "image" : "images"} will no longer appear on the canvas.`;
+                    ? `Delete "${nodeLabel(node.data)}"? Its ${count} ${count === 1 ? "image stays" : "images stay"} available to the ${dependents} ${dependents === 1 ? "node" : "nodes"} using them.`
+                    : `Delete "${nodeLabel(node.data)}"? Its ${count} ${count === 1 ? "image" : "images"} will no longer appear on the canvas.`;
                 else if (
                   pendingDocuments.current.has(node.id) ||
                   pendingPatches.current.has(node.id)
@@ -1482,7 +1454,7 @@ export function GraphWorkspace({
               <button
                 onClick={() => setHelpOpen(true)}
                 aria-label="Keyboard shortcuts"
-                title="N: New node; B: Continue editing; Cmd/Ctrl D: Try another / Duplicate draft; F: Fit; Shift: Select; Space: Pan; Delete: Delete; Cmd/Ctrl Enter: Run; @: Reference; Escape: Close"
+                title="N: New node; B: New connected node; Cmd/Ctrl D: Duplicate draft; F: Fit; Shift: Select; Space: Pan; Delete: Delete; Cmd/Ctrl Enter: Run; @: Reference; Escape: Close"
                 className="rounded border bg-white px-2 py-1 text-neutral-500"
               >
                 ?
@@ -1491,9 +1463,9 @@ export function GraphWorkspace({
             {nodes.length === 0 ? (
               <Panel position="top-center">
                 <div className="mt-20 max-w-sm rounded-xl border bg-white p-5 text-center shadow-sm">
-                  <p>1. Describe an object.</p>
+                  <p>1. Describe a design.</p>
                   <p>2. Run to generate it.</p>
-                  <p>3. Continue editing to change it.</p>
+                  <p>3. Add a connected node to change it.</p>
                   <button
                     className="mt-3 rounded bg-neutral-900 px-4 py-2 text-sm text-white"
                     onClick={() => void addNode()}

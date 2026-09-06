@@ -238,13 +238,6 @@ createServer(async (request, response) => {
         branch_node_ids: [],
         masked_outside_change: node.mask ? 0 : null,
       };
-      if (node.title === "Untitled node")
-        node.title = node.prompt
-          .trim()
-          .split(/\s+/)
-          .slice(0, 5)
-          .join(" ")
-          .slice(0, 60);
       node.versions.push(version);
       node.active_version_id = version.id;
       entry.job.status = "complete";
@@ -276,7 +269,7 @@ createServer(async (request, response) => {
     response.writeHead(409).end(
       JSON.stringify({
         detail:
-          "This node is frozen. Continue editing or Revise prompt to make a new node.",
+          "This node is frozen. Continue editing to make a new node.",
       }),
     );
     return;
@@ -348,7 +341,7 @@ createServer(async (request, response) => {
     const node = {
       ...fixture().nodes[1],
       id: body.id,
-      title: "Untitled node",
+      title: "",
       prompt: "",
       document: [],
       position: body.position,
@@ -365,7 +358,8 @@ createServer(async (request, response) => {
     const node = {
       ...structuredClone(fixture().nodes[1]),
       id: body.id,
-      title: "Untitled node",
+      title: "",
+      settings: structuredClone(source.settings),
       document: [],
       prompt: "",
       position: body.position,
@@ -390,7 +384,7 @@ createServer(async (request, response) => {
     const node = {
       ...structuredClone(source),
       id: body.id,
-      title: `${source.title} · copy`,
+      title: "",
       seed: body.fresh_seed ? randomInt(2 ** 32) : source.seed,
       position: body.position,
       versions: [],

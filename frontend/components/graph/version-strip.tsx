@@ -13,10 +13,6 @@ export function VersionStrip({
   const actions = useDesignNodeActions();
   return (
     <div>
-      <p className="text-[10px] text-neutral-500">
-        Older project — this node has {versions.length} images. New nodes make
-        one image each.
-      </p>
       <div
         className="nodrag nowheel flex gap-2 overflow-x-auto"
         aria-label="Legacy images"

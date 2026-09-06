@@ -112,7 +112,10 @@ def test_collapse_does_not_guess_historical_instructions(client: TestClient) -> 
         "and background.\nChange only: {resolved_user_prompt}\n"
         "Do not restyle or reinterpret any other element."
     )
-    with patch("app.services.prompt_builder.PRESERVATION_PREAMBLE", legacy):
+    with patch(
+        "app.services.run_freezing.build_prompt",
+        return_value=legacy.format(resolved_user_prompt="Make it blue"),
+    ):
         _, edit = submit_and_execute(
             client, project, branch["node"]["id"], queue, provider
         )

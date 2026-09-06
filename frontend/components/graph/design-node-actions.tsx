@@ -18,7 +18,6 @@ type DesignNodeActions = {
   duplicateNode: (nodeId: string) => void;
   deleteNode: (nodeId: string) => void;
   resolveDraft: (nodeId: string, keepMine: boolean) => void;
-  reviseNode: (nodeId: string, submit?: boolean) => void;
   removeMask: (nodeId: string) => void;
   runNode: (nodeId: string) => void;
   editMask: (nodeId: string) => void;

@@ -130,6 +130,7 @@ export type WorkspaceEdgeData = (
   { role: "subject"; pin: VersionPin } | { role: "connect"; pin: ActivePin }
 ) & {
   number: number;
+  showNumber?: boolean;
   state: "ready" | "empty" | "deleted";
   highlighted?: boolean;
   dimmed?: boolean;
@@ -410,7 +411,7 @@ export function toWorkspaceGraph(graph: GraphDocument): {
                 edgeId: edge.id,
                 nodeId: source.id,
                 deleted: source.deleted,
-                nodeTitle: source.title,
+                nodeTitle: nodeLabel(source),
                 versionId: pinned.id,
                 artifactUrl: pinned.artifact_url,
               }
@@ -442,7 +443,7 @@ export function toWorkspaceGraph(graph: GraphDocument): {
                   versionId: source?.active_version_id ?? null,
                   edgeId: part.edge_id,
                   nodeId: part.source_node_id,
-                  title: source?.title ?? "Deleted reference",
+                  title: source ? nodeLabel(source) : "Deleted reference",
                   state:
                     !source || source.deleted
                       ? "deleted"
@@ -532,6 +533,15 @@ export function workspaceWires(
     ),
   ].map((edge) => ({
     ...edge,
+    data: edge.data
+      ? {
+          ...edge.data,
+          showNumber: nodes.some(
+            (node) => node.id === edge.target &&
+              node.data.connects.length + Number(!!node.data.subject) > 1,
+          ),
+        }
+      : undefined,
     ariaLabel: `${edge.data?.role === "subject" ? "Input" : "Reference"} image ${edge.data?.number}`,
     interactionWidth: 24,
     zIndex: 5,
@@ -590,4 +600,12 @@ async function apiRequest<T>(input: string, init?: RequestInit): Promise<T> {
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+export function nodeLabel(node: { title: string; prompt: string }): string {
+  return (
+    node.title.trim() ||
+    node.prompt.trim().split(/\s+/).slice(0, 5).join(" ") ||
+    "Image"
+  );
 }

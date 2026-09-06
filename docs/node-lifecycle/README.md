@@ -1,10 +1,10 @@
 # One node, one image
 
-A successful run turns its draft into a frozen result. Continue editing starts from that image to the right; Try another copies its starting input and draft below, stores a fresh seed, and submits; Revise prompt copies below without submitting. Failed runs remain editable and retryable. Titles and canvas positions remain editable throughout.
+A successful run turns its draft into a frozen result. A new draft has no main image until its own run succeeds; any pinned input remains visible only in the input row. Continue editing is the only forward action and inherits White bg from the input node. Every node shows White bg; new nodes default to on, and running/result nodes show the frozen setting. Titles stay empty until someone names the node. Failed runs remain editable and retryable. Titles and canvas positions remain editable throughout.
 
 Saving an area selection outlines the input, changes the prompt placeholder, focuses the prompt, and explains that Run is next. References and area selections exclude each other in both the editor and API. Results retain their outline and display the outside-selection preservation measurement under the image.
 
-The canvas is the history. Exactly two selected image nodes expose Compare, whose captions use node names and timestamps. The help button contains the requested six invariants verbatim and the shortcut table. The sole use of “version” in application copy is the verbatim fourth invariant; controls and errors use the new vocabulary.
+The canvas is the history. Exactly two selected image nodes expose Compare, whose captions use node names or prompt words. The help button contains the requested six invariants verbatim and the shortcut table. The sole use of “version” in application copy is the verbatim fourth invariant; controls and errors use the new vocabulary.
 
 ## Migration and legacy references
 
@@ -23,7 +23,7 @@ The capture uses the real frontend with the deterministic browser-test provider;
 ## Verification
 
 - Backend tests cover frozen-field conflicts, running locks, retry after failure, duplicate inputs and seeds, legacy selection, and both selection/reference conflicts.
-- Browser tests cover every edge-case row in the brief, frozen and failed cards, armed selections, all forward actions, Compare selection cardinality, ten-card placement, framing, help, and the empty canvas.
+- Browser tests cover every edge-case row in the brief, frozen and failed cards, armed selections, Continue editing, Compare selection cardinality, ten-card placement, framing, help, and the empty canvas.
 - Verified: 105 backend tests passed, 35 browser tests passed, 2 frontend unit tests passed, production build, type checking, ESLint, and Ruff. Seven PostgreSQL-specific tests were skipped because `TEST_DATABASE_URL` was not configured.
 - A migration test verifies that restoring a formerly hidden image preserves both the node and artifact.
 

@@ -21,18 +21,17 @@ export function ImageViewer({
     <dialog
       ref={dialog}
       onCancel={onClose}
-      className="m-auto h-[94vh] w-[96vw] max-w-none rounded-xl bg-neutral-950 p-4 text-white backdrop:bg-black/70"
+      className="m-auto h-[94vh] w-[96vw] max-w-none rounded-xl bg-white p-4 text-neutral-900 backdrop:bg-black/70"
     >
       <header className="mb-3 flex items-center justify-between">
         <p className="text-sm">
-          {versions.length === 2 ? "Compare images" : "Inspect image"} · Scroll
-          to zoom, drag to pan
+          {versions.length === 2 ? "Compare images" : ""}
         </p>
         <button
           onClick={onClose}
           className="rounded border border-neutral-600 px-3 py-1 text-sm"
         >
-          Close · Esc
+          Close
         </button>
       </header>
       <div
@@ -77,9 +76,9 @@ function ImagePane({ version, label }: { version: Version; label: string }) {
   };
   return (
     <section className="flex min-h-0 flex-col gap-2">
-      <div className="flex items-center justify-between gap-2 text-xs text-neutral-300">
+      <div className="flex items-center justify-between gap-2 text-xs text-neutral-600">
         <span>
-          {label} · {new Date(version.created_at).toLocaleString()}
+          {label}
         </span>
         <div className="flex items-center gap-3">
           <button aria-label="Zoom out" onClick={() => zoom(1 / 1.25)}>
@@ -98,7 +97,7 @@ function ImagePane({ version, label }: { version: Version; label: string }) {
         </p>
       ) : null}
       <div
-        className="relative flex min-h-0 flex-1 cursor-grab items-center justify-center overflow-hidden rounded-lg bg-neutral-800 touch-none active:cursor-grabbing"
+        className="relative flex min-h-0 flex-1 cursor-grab items-center justify-center overflow-hidden rounded-lg bg-white touch-none active:cursor-grabbing"
         onWheel={(event) => {
           event.stopPropagation();
           zoom(event.deltaY < 0 ? 1.1 : 1 / 1.1);

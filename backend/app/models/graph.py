@@ -63,7 +63,7 @@ class GraphNode(Base):
         ForeignKey("projects.id", ondelete="CASCADE"),
         index=True,
     )
-    title: Mapped[str] = mapped_column(String(120), default="Untitled node")
+    title: Mapped[str] = mapped_column(String(120), default="")
     prompt: Mapped[list[PromptPart]] = mapped_column(json_type, default=list)
     revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     settings: Mapped[dict[str, object]] = mapped_column(

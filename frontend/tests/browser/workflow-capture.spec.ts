@@ -24,7 +24,7 @@ test("record generate → continue editing → area selection → run", async ({
     .getByRole("button", { name: "New Project", exact: true })
     .first()
     .click();
-  await expect(page.getByText("1. Describe an object.")).toBeVisible();
+  await expect(page.getByText("1. Describe a design.")).toBeVisible();
   await page.waitForTimeout(1800);
   await page.getByRole("button", { name: "Add node", exact: true }).click();
   await page
@@ -36,14 +36,13 @@ test("record generate → continue editing → area selection → run", async ({
   await page.waitForTimeout(2200);
   await request.post(`${api}/finish-run`);
   await page
-    .getByRole("button", { name: "Continue editing", exact: true })
+    .getByRole("button", { name: "New node", exact: true })
     .click();
   const draft = page.locator('.design-card[data-state="draft"]');
   await expect(
     draft.getByRole("textbox", { name: "Design prompt" }),
   ).toBeFocused();
   await page.waitForTimeout(1500);
-  await draft.locator(".image-preview").hover();
   await draft.getByRole("button", { name: "Select area", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "rectangle", exact: true }).click();

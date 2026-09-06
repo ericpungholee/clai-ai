@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, JsonValue, StringConstraints
 from app.domain.runs import Op
 
 Title = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)
+    str, StringConstraints(strip_whitespace=True, min_length=0, max_length=120)
 ]
 
 
@@ -124,7 +124,7 @@ class GraphDocument(BaseModel):
 
 class NodeCreate(BaseModel):
     id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    title: Title = "Untitled node"
+    title: Title = ""
     prompt: str = Field(default="", max_length=8000)
     settings: NodeSettingsData = Field(default_factory=NodeSettingsData)
     seed: int | None = None
@@ -154,7 +154,7 @@ class SubjectEdgeReplace(BaseModel):
 
 class BranchCreate(BaseModel):
     id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    title: Title = "Untitled node"
+    title: Title = ""
     prompt: str = Field(default="", max_length=8000)
     settings: NodeSettingsData = Field(default_factory=NodeSettingsData)
     position: GraphPosition
