@@ -1,39 +1,16 @@
+import time
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.runs import FrozenRunRequest
-from app.models.graph import GraphNode, RunJob, Version, VersionMetric
+from app.models.graph import GraphNode, RunJob, Version
 from app.models.project import Project
 from app.providers.base import ImageProvider, ProviderJob
 from app.services.frozen_request_codec import decode_frozen_request
 from app.storage.artifacts import ArtifactIngestor, StoredArtifact
-
-
-@dataclass(frozen=True)
-class ChangeMagnitudeResult:
-    method: str
-    status: str
-    value: float | None = None
-    error: str | None = None
-
-
-class ChangeMagnitudeScorer(Protocol):
-    def score(
-        self, *, request: FrozenRunRequest, artifact: StoredArtifact
-    ) -> ChangeMagnitudeResult: ...
-
-
-class PendingDinoV2Scorer:
-    def score(
-        self, *, request: FrozenRunRequest, artifact: StoredArtifact
-    ) -> ChangeMagnitudeResult:
-        del request, artifact
-        return ChangeMagnitudeResult(method="dinov2_cosine", status="pending")
 
 
 class RunExecutionError(RuntimeError):
@@ -46,10 +23,13 @@ def execute_run_job(
     session_factory: sessionmaker[Session],
     provider: ImageProvider,
     ingestor: ArtifactIngestor,
-    scorer: ChangeMagnitudeScorer,
 ) -> uuid.UUID:
+    run_started = time.monotonic()
     request = _claim_job(job_id=job_id, session_factory=session_factory)
+    provider_started: float | None = None
+    provider_elapsed: float | None = None
     try:
+        provider_started = time.monotonic()
         provider_job = provider.execute(request)
         _record_provider_job(
             job_id=job_id,
@@ -57,36 +37,34 @@ def execute_run_job(
             session_factory=session_factory,
         )
         result = provider.result(provider_job)
+        provider_elapsed = time.monotonic() - provider_started
         _record_provider_result(
             job_id=job_id,
             metadata=result.response_metadata,
+            provider_elapsed_seconds=provider_elapsed,
             session_factory=session_factory,
         )
         if request.mask is not None:
-            artifact, drift = ingestor.ingest_masked(result, request)
-            metric = ChangeMagnitudeResult(
-                method="outside_feather_pixel_diff", status="complete", value=drift
-            )
+            artifact = ingestor.ingest_masked(result, request)
         else:
             artifact = ingestor.ingest(result)
-            metric = (
-                scorer.score(request=request, artifact=artifact)
-                if request.subject is not None
-                else ChangeMagnitudeResult(method="dinov2_cosine", status="pending")
-            )
         return _commit_version(
             job_id=job_id,
             request=request,
             provider_job=provider_job,
             artifact=artifact,
             response_metadata=result.response_metadata,
-            metric=metric,
+            total_elapsed_seconds=time.monotonic() - run_started,
             session_factory=session_factory,
         )
     except Exception as error:
+        if provider_started is not None and provider_elapsed is None:
+            provider_elapsed = time.monotonic() - provider_started
         _record_failure(
             job_id=job_id,
             error=error,
+            provider_elapsed_seconds=provider_elapsed,
+            total_elapsed_seconds=time.monotonic() - run_started,
             session_factory=session_factory,
         )
         raise
@@ -134,11 +112,13 @@ def _record_provider_result(
     *,
     job_id: uuid.UUID,
     metadata: dict[str, object],
+    provider_elapsed_seconds: float,
     session_factory: sessionmaker[Session],
 ) -> None:
     with session_factory.begin() as db:
         job = _lock_job(db, job_id)
         job.provider_response_metadata = metadata
+        job.provider_elapsed_seconds = provider_elapsed_seconds
         job.status = "ingesting"
 
 
@@ -149,7 +129,7 @@ def _commit_version(
     provider_job: ProviderJob,
     artifact: StoredArtifact,
     response_metadata: dict[str, object],
-    metric: ChangeMagnitudeResult,
+    total_elapsed_seconds: float,
     session_factory: sessionmaker[Session],
 ) -> uuid.UUID:
     with session_factory.begin() as db:
@@ -204,19 +184,9 @@ def _commit_version(
         if project is not None:
             project.thumbnail_url = artifact.artifact_url
             project.updated_at = datetime.now(UTC)
-        if request.subject is not None:
-            db.add(
-                VersionMetric(
-                    version_id=version.id,
-                    op=request.op.value,
-                    method=metric.method,
-                    status=metric.status,
-                    change_magnitude=metric.value,
-                    error=metric.error,
-                )
-            )
         job.status = "complete"
         job.completed_at = datetime.now(UTC)
+        job.total_elapsed_seconds = total_elapsed_seconds
         job.error = None
         return version.id
 
@@ -225,6 +195,8 @@ def _record_failure(
     *,
     job_id: uuid.UUID,
     error: Exception,
+    provider_elapsed_seconds: float | None,
+    total_elapsed_seconds: float,
     session_factory: sessionmaker[Session],
 ) -> None:
     with session_factory.begin() as db:
@@ -234,6 +206,9 @@ def _record_failure(
         job.status = "failed"
         job.error = f"{type(error).__name__}: {error}"[:8000]
         job.completed_at = datetime.now(UTC)
+        if job.provider_elapsed_seconds is None:
+            job.provider_elapsed_seconds = provider_elapsed_seconds
+        job.total_elapsed_seconds = total_elapsed_seconds
 
 
 def _lock_job(db: Session, job_id: uuid.UUID) -> RunJob:

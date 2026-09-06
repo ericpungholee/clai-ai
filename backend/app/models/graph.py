@@ -222,43 +222,6 @@ class GraphEdge(Base):
     )
 
 
-class VersionMetric(Base):
-    __tablename__ = "version_metrics"
-    __table_args__ = (
-        CheckConstraint(
-            "op IN ('generate', 'generate_ref', 'edit_instruct', "
-            "'edit_inpaint', 'edit_composite', 'edit_ref_guided')",
-            name="ck_version_metrics_op",
-        ),
-        CheckConstraint(
-            "status IN ('pending', 'complete', 'failed')",
-            name="ck_version_metrics_status",
-        ),
-        CheckConstraint(
-            "change_magnitude IS NULL OR "
-            "(change_magnitude >= 0 AND change_magnitude <= 1)",
-            name="ck_version_metrics_magnitude",
-        ),
-    )
-
-    version_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("versions.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    op: Mapped[str] = mapped_column(String(32))
-    method: Mapped[str] = mapped_column(String(120), default="dinov2_cosine")
-    status: Mapped[str] = mapped_column(String(16), default="pending")
-    change_magnitude: Mapped[float | None] = mapped_column(Float, nullable=True)
-    error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-
 class VersionMesh(Base):
     __tablename__ = "version_meshes"
     __table_args__ = (
@@ -357,6 +320,8 @@ class RunJob(Base):
     )
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider_elapsed_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_elapsed_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

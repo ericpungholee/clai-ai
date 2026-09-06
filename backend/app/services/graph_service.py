@@ -10,7 +10,6 @@ from app.models.graph import (
     GraphNode,
     RunJob,
     Version,
-    VersionMetric,
 )
 from app.schemas.graph import (
     ActivePinData,
@@ -100,17 +99,6 @@ def read_graph_document(project_id: uuid.UUID, db: Session) -> GraphDocument:
         ],
         edges=[serialize_edge(edge) for edge in edges],
     )
-    version_ids = [version.id for version in versions]
-    masked_metrics = {
-        metric.version_id: metric.change_magnitude
-        for metric in db.scalars(
-            select(VersionMetric).where(
-                VersionMetric.version_id.in_(version_ids),
-                VersionMetric.method == "outside_feather_pixel_diff",
-                VersionMetric.status == "complete",
-            )
-        )
-    }
     alive = {node.id for node in nodes if node.deleted_at is None}
     branches: dict[uuid.UUID, list[uuid.UUID]] = {}
     for edge in edges:
@@ -123,8 +111,6 @@ def read_graph_document(project_id: uuid.UUID, db: Session) -> GraphDocument:
     for node in document.nodes:
         for version in node.versions:
             version.branch_node_ids = branches.get(version.id, [])
-            if version.op in {"edit_inpaint", "edit_composite"}:
-                version.masked_outside_change = masked_metrics.get(version.id)
     ranked = (
         select(
             RunJob.id,
@@ -147,6 +133,8 @@ def read_graph_document(project_id: uuid.UUID, db: Session) -> GraphDocument:
             RunJob.error,
             RunJob.created_at,
             RunJob.completed_at,
+            RunJob.provider_elapsed_seconds,
+            RunJob.total_elapsed_seconds,
             RunJob.frozen_request["op"].as_string().label("op"),
         )
         .join(ranked, ranked.c.id == RunJob.id)

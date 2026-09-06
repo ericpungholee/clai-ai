@@ -8,7 +8,7 @@ Clai is a canvas for designing physical products with AI. A draft produces one i
 - Continue editing creates a new draft to the right. Failed runs remain editable and retryable.
 - Solid input-image wires and up to two dashed references, with numbered prompt chips.
 - Area selection with brush, lasso, rectangle, and SAM click/text selection. Saving outlines the input and focuses the prompt; Run generates the change.
-- FLUX Fill inpainting with a deterministic 3px composite seam. Pixels outside that band are preserved, and the result shows the preservation measurement.
+- FLUX Fill inpainting with a deterministic 3px composite seam. Pixels outside that band are preserved.
 - Durable database-backed runs with frozen requests, Celery transport, and first-party artifact ingestion.
 - Nano Banana Pro generation and unmasked editing through fal.
 - Canvas comparison of any two image nodes, full-size inspection, original downloads, and explicit editable chain collapse.

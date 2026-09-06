@@ -10,7 +10,6 @@ from app.models.graph import RunJob, VersionMesh
 from app.providers.factory import FalImageProvider
 from app.providers.fal_transport import FalSdkTransport
 from app.providers.tripo import TripoProvider
-from app.services.drift import create_change_magnitude_scorer
 from app.services.mesh_jobs import execute_mesh_job
 from app.services.run_execution import execute_run_job
 from app.storage.artifacts import HttpArtifactReader
@@ -47,9 +46,6 @@ def run_job(job_id: str) -> str:
         artifact_reader = create_artifact_reader(settings)
         provider = FalImageProvider(settings=settings, artifact_reader=artifact_reader)
         ingestor = create_provider_output_ingestor(settings)
-        scorer = create_change_magnitude_scorer(
-            settings=settings, artifact_reader=artifact_reader
-        )
     except Exception as error:
         with SessionLocal.begin() as db:
             job = db.scalar(
@@ -65,7 +61,6 @@ def run_job(job_id: str) -> str:
         session_factory=SessionLocal,
         provider=provider,
         ingestor=ingestor,
-        scorer=scorer,
     )
     return str(version_id)
 

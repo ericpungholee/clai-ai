@@ -48,7 +48,6 @@ export const DesignNode = memo(function DesignNode({
           ? "Source node deleted. This image is retained and still usable."
           : null))
       : null;
-  const preservation = activeVersion?.masked_outside_change;
   const run = () => {
     if (!blocked) actions.runNode(id);
   };
@@ -148,14 +147,6 @@ export const DesignNode = memo(function DesignNode({
             ) : null}
           </div>
         </div>
-      ) : null}
-      {result && preservation != null ? (
-        <p className="text-[10px] text-neutral-600">
-          Outside the selection:{" "}
-          {preservation === 0
-            ? "unchanged."
-            : `${(preservation * 100).toFixed(2)}% changed.`}
-        </p>
       ) : null}
       <SubjectRow id={id} data={data} locked={locked} />
       {!result ? (

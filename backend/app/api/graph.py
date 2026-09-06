@@ -351,6 +351,8 @@ def serialize_run_job(job_id: uuid.UUID, db: Session) -> RunJobData:
         version_id=version_id,
         created_at=job.created_at,
         completed_at=job.completed_at,
+        provider_elapsed_seconds=job.provider_elapsed_seconds,
+        total_elapsed_seconds=job.total_elapsed_seconds,
     )
 
 

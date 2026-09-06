@@ -37,7 +37,7 @@ flowchart LR
 | `backend/app/schemas/` | Pydantic request/response contracts. Mesh and selection contracts also live beside their routes. |
 | `backend/app/models/` | SQLAlchemy persistence models and relational constraints. |
 | `backend/app/domain/` | Immutable run snapshots, operation vocabulary, and structured prompt parts. |
-| `backend/app/services/` | Graph mutations, input resolution/freezing, run and mesh execution, masks, and drift measurements. |
+| `backend/app/services/` | Graph mutations, input resolution/freezing, run and mesh execution, and masks. |
 | `backend/app/providers/` | fal transport and Nano Banana Pro, FLUX Fill, SAM, and Tripo adapters. |
 | `backend/app/storage/` | Filesystem/S3 stores, artifact readers, image ingestion, and GLB validation. |
 | `backend/app/workers/celery_app.py` | Celery configuration, dependency construction, and image/mesh task entry points. |
@@ -68,14 +68,13 @@ erDiagram
 | `projects` | Name, creation/activity timestamps, latest successful generation thumbnail, and `deleted_at`. |
 | `graph_nodes` | Project ownership, title, structured JSON prompt, settings, optional seed, position, revision, active image pointer, subject-bound mask, and deletion timestamp. |
 | `graph_edges` | Source/target nodes within one project, `subject` or `connect` role, pin mode, optional pinned version, and reference order. |
-| `run_jobs` | Node/project, idempotency key, frozen request, status, attempt count, provider request ID/payload, response metadata, errors, and stage timestamps. |
+| `run_jobs` | Node/project, idempotency key, frozen request, status, attempt count, provider request ID/payload, response metadata, errors, status timestamps, and coarse provider/total elapsed values. |
 | `versions` | Immutable image URL/key/hash/type, originating run, provider/model/endpoint, parameters, seed, resolved input IDs/mask hash, runtime prompt, and edit depth. |
-| `version_metrics` | One mutable measurement record per version, with method, status, value, and error. |
 | `version_meshes` | One mutable mesh cache/job record per version, with attempt ID, texture mode, frozen source URL, provider state, GLB/preview URLs, and elapsed time. |
 
 The database enforces same-project edge endpoints, version ownership for subject pins and active-image pointers, no self-edge, one subject per target, unique reference sources, unique reference positions, and valid role/pin combinations. PostgreSQL additionally enforces the two-reference cap with a trigger that locks the target node. The application validates contiguous reference order and synchronizes reference chips with their wires.
 
-A PostgreSQL trigger rejects `UPDATE` and `DELETE` on `versions`; changing metrics or mesh state does not modify an image version. Each run can produce at most one version through a unique `run_job_id`. **One image per new node is enforced by submission and worker commit checks under locks**, not a unique constraint on `versions.node_id`: legacy nodes can retain multiple images.
+A PostgreSQL trigger rejects `UPDATE` and `DELETE` on `versions`; changing mesh state does not modify an image version. Each run can produce at most one version through a unique `run_job_id`. **One image per new node is enforced by submission and worker commit checks under locks**, not a unique constraint on `versions.node_id`: legacy nodes can retain multiple images.
 
 The node's active-version foreign key is deferred to support the version/node relationship within a transaction. SQLAlchemy uses JSONB on PostgreSQL and JSON on SQLite. Tests using SQLite do not reproduce PostgreSQL row locking or triggers.
 
@@ -148,7 +147,7 @@ sequenceDiagram
     W->>F: Obtain result
     W->>DB: Record metadata, mark ingesting
     W->>S: Validate/composite/store image
-    W->>DB: Commit version, metric, active pointer, project thumbnail, complete job
+    W->>DB: Commit version, active pointer, project thumbnail, complete job
     UI->>API: Poll job and refresh graph
 ```
 
@@ -180,7 +179,7 @@ Nano Banana uploads Clai-owned input bytes to fal, requests one PNG, maps the la
 
 Status progresses through `queued → dispatching → provider_pending → ingesting → complete`, with failures recorded as `failed`. Claiming requires `queued` and increments `attempts`. Duplicate deliveries cannot resubmit a job that has already advanced. Provider setup failures are also recorded before generation starts.
 
-The commit transaction locks the project/job/node, returns an existing version for the same job if present, rejects a second image on the node, then inserts the version and optional metric. It selects the new image and updates project activity/thumbnail. It does not auto-name the node.
+The commit transaction locks the project/job/node, returns an existing version for the same job if present, rejects a second image on the node, then inserts the version. It selects the new image and updates project activity/thumbnail. It does not auto-name the node.
 
 The browser polls a submitted image job every 750 ms; graph polling restores persisted progress after reload. A polling error continues checking the existing job instead of automatically submitting another.
 
@@ -194,9 +193,7 @@ Click/text selection calls the API synchronously, rather than creating a Celery 
 
 Saving a mask verifies the editable node, its pinned subject version, RLE validity, and actual image dimensions. Masks bind to exact subject version IDs. A stale mask blocks a run; references and saved selections exclude each other. Empty masks are rejected; a full-image selection normalizes to an unmasked edit during input resolution.
 
-For partial masks, [compositing](backend/app/services/masks.py) resizes provider output to the original dimensions if necessary, applies generated pixels within the selection, and blends a three-pixel outer band. Pixels beyond that band come from the original. The stored output is PNG. A normalized outside-band pixel difference is recorded as `outside_feather_pixel_diff` and exposed on graph versions for display.
-
-Unmasked edits have no equivalent pixel-preservation guarantee. An optional external DINOv2 scorer receives temporary subject/output files and returns a value in [0, 1]. With no configured command the measurement stays pending. Scorer command failures become failed metrics rather than failed image generations. The repository supplies the integration and offline regression report, not a bundled DINOv2 model.
+For partial masks, [compositing](backend/app/services/masks.py) resizes provider output to the original dimensions if necessary, applies generated pixels within the selection, and blends a three-pixel outer band. Pixels beyond that band come from the original. The stored output is PNG.
 
 ## 8. Image history, continuation, deletion, and collapse
 
@@ -235,7 +232,7 @@ Image downloads permit only configured HTTPS hosts, disable redirects, and cap b
 
 Compose shares the backend bind mount between API and worker, including the default `.data/artifacts` directory relative to `/app`. A custom filesystem path must likewise be shared. In S3 mode the public origin/prefix must map to the actual stored keys; the application does not provision buckets or hosting policies.
 
-Storage writes precede database commit. A later commit or metric failure can leave an unreferenced artifact; there is no cross-storage transaction or cleanup worker. S3 content addressing is not S3 Object Lock, and direct bucket/filesystem modifications sit outside the application's immutability rules.
+Storage writes precede database commit. A later commit failure can leave an unreferenced artifact; there is no cross-storage transaction or cleanup worker. S3 content addressing is not S3 Object Lock, and direct bucket/filesystem modifications sit outside the application's immutability rules.
 
 ## 11. HTTP surface
 
@@ -245,7 +242,7 @@ All project-scoped paths below are relative to `/api/projects/{project_id}`. Bod
 | --- | --- |
 | `GET/POST /api/projects` | List live projects / create a project. |
 | `GET/PATCH/DELETE /api/projects/{project_id}` | Read / rename / soft-delete a project. |
-| `GET /graph` | Full graph with retained nodes, versions, branch links, masked metrics, and latest runs. |
+| `GET /graph` | Full graph with retained nodes, versions, branch links, and latest runs. |
 | `POST /nodes` | Create a draft. |
 | `PATCH/DELETE /nodes/{node_id}` | Update scoped fields / remove or retain a node. |
 | `POST /nodes/{node_id}/duplicate` | Copy setup and incoming inputs without results. |
@@ -261,13 +258,13 @@ All project-scoped paths below are relative to `/api/projects/{project_id}`. Bod
 | `GET/POST /versions/{version_id}/mesh` | Read cache / request 3D or a supported texture upgrade. |
 | `GET /health`, `GET /health/ready` | API liveness / database and Redis connectivity (outside project scope). |
 
-The API sanitizes request-validation errors to type/location/message. Mutation conflicts generally return 409, invalid graph inputs 422, missing scoped resources 404, and queue unavailability 503. Full graph serialization enriches nodes with derived runs, branches, and metrics; individual node responses are simpler, so the client refreshes for authoritative derived state.
+The API sanitizes request-validation errors to type/location/message. Mutation conflicts generally return 409, invalid graph inputs 422, missing scoped resources 404, and queue unavailability 503. Full graph serialization enriches nodes with derived runs and branches; individual node responses are simpler, so the client refreshes for authoritative derived state.
 
 ## 12. Configuration and operational boundaries
 
-[Settings](backend/app/core/config.py) load `.env`, ignore extra fields, and cache the settings instance. `DATABASE_URL` is required. `REDIS_URL` selects the Celery broker/result backend. `FAL_KEY` is required for real image generation, SAM, and 3D. `FAL_TIMEOUT_SECONDS`, `FAL_OUTPUT_HOSTS`, artifact settings, optional drift command/timeout, and `CORS_ORIGINS` control the integrations. S3 mode requires bucket, access key, and secret key, with optional endpoint/region.
+[Settings](backend/app/core/config.py) load `.env`, ignore extra fields, and cache the settings instance. `DATABASE_URL` is required. `REDIS_URL` selects the Celery broker/result backend. `FAL_KEY` is required for real image generation, SAM, and 3D. `FAL_TIMEOUT_SECONDS`, `FAL_OUTPUT_HOSTS`, artifact settings, and `CORS_ORIGINS` control the integrations. S3 mode requires bucket, access key, and secret key, with optional endpoint/region.
 
-[README](README.md) and [Makefile](Makefile) provide local commands. Apply the complete Alembic chain; do not delete old revisions because later revisions depend on them, even when a feature such as image visibility has been retired. The current head, `c9512e4a731b`, restores an active image on older hidden nodes and drops obsolete visibility preferences without deleting versions.
+[README](README.md) and [Makefile](Makefile) provide local commands. Apply the complete Alembic chain; do not delete old revisions because later revisions depend on them, even when a feature has been retired. The current head, `0f7d4b2a91ce`, drops output measurements and keeps provider/total elapsed values on run jobs.
 
 There is no authentication, ownership/authorization model, billing, rate limiting, sharing, or hosted deployment configuration. CORS is not access control. Readiness verifies PostgreSQL and Redis, not fal credentials, worker availability, or artifact storage. The implementation has no run-all scheduler, automatic provider fallback, cancellation, realtime presence, or artifact retention sweeper.
 
@@ -275,6 +272,6 @@ There is no authentication, ownership/authorization model, billing, rate limitin
 
 Runtime imports, exported symbols, CSS selectors, dependency manifests, and file contents were audited. Application modules and dependencies remain in use; no identical nonempty production files were found. The unused empty Next.js configuration was removed. Database migrations and compatibility paths for retained images remain necessary.
 
-Tests, benchmark runners, timing reports, and saved performance baselines are local-only and are not part of the git tree. `make test` runs frontend lint and type checking. `make lint` covers application Python and frontend lint. `make benchmark` remains available locally when those scripts are present.
+Local tests are not part of the git tree. `make test` runs frontend lint and type checking. `make lint` covers application Python and frontend lint.
 
 `GraphWorkspace` still coordinates saves, polling, merges, and actions. All of those paths are active; splitting them is a separate behavioral refactor. Full-graph refreshes read retained history, so large projects may eventually benefit from pagination or incremental synchronization.

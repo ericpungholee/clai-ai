@@ -235,7 +235,7 @@ class ArtifactIngestor:
 
     def ingest_masked(
         self, result: ProviderResult, request: FrozenRunRequest
-    ) -> tuple[StoredArtifact, float]:
+    ) -> StoredArtifact:
         if (
             request.subject is None
             or request.mask is None
@@ -246,14 +246,14 @@ class ArtifactIngestor:
             )
         original = self._subject_reader.read(request.subject.artifact_url)
         generated = self._reader.read(result.output_url)
-        content, drift = composite_masked_output(
+        content = composite_masked_output(
             original=original.content, generated=generated.content, mask=request.mask
         )
         return self._store.put(
             key=f"runs/{result.job.request_id}/output.png",
             content=content,
             content_type="image/png",
-        ), drift
+        )
 
     def ingest(self, result: ProviderResult) -> StoredArtifact:
         artifact = self._reader.read(result.output_url)

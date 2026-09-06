@@ -35,7 +35,6 @@ export type Version = {
   prompt_at_runtime: string;
   edit_depth: number;
   branch_node_ids: string[];
-  masked_outside_change: number | null;
 };
 
 export type PersistedGraphNode = {
@@ -155,6 +154,8 @@ export type RunJob = {
   version_id: string | null;
   created_at: string;
   completed_at: string | null;
+  provider_elapsed_seconds: number | null;
+  total_elapsed_seconds: number | null;
 };
 
 export async function saveMask(

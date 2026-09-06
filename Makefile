@@ -1,4 +1,4 @@
-.PHONY: dev down logs migrate revision backend-shell db-shell test benchmark lint
+.PHONY: dev down logs migrate revision backend-shell db-shell test lint
 
 dev:
 	docker compose up --build
@@ -24,9 +24,6 @@ db-shell:
 test:
 	docker compose exec frontend npm run lint
 	docker compose exec frontend npm run typecheck
-
-benchmark:
-	docker compose exec -T -e BENCHMARK_REVISION="$$(git rev-parse HEAD)" backend .venv/bin/python -m scripts.benchmark_generation --manifest .data/benchmarks/manifest.json --output .data/benchmarks/$(if $(OUTPUT),$(OUTPUT),after) --runs $(if $(RUNS),$(RUNS),5)
 
 lint:
 	docker compose exec backend uv run ruff check app alembic

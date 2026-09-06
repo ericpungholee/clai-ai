@@ -38,7 +38,6 @@ class VersionData(BaseModel):
     prompt_at_runtime: str
     edit_depth: int
     branch_node_ids: list[uuid.UUID] = Field(default_factory=list)
-    masked_outside_change: float | None = None
 
 
 class MaskData(BaseModel):
@@ -190,3 +189,5 @@ class RunJobData(BaseModel):
     version_id: uuid.UUID | None
     created_at: datetime
     completed_at: datetime | None
+    provider_elapsed_seconds: float | None
+    total_elapsed_seconds: float | None

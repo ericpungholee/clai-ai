@@ -18,8 +18,6 @@ class Settings(BaseSettings):
     fal_key: SecretStr | None = None
     fal_timeout_seconds: float = 120.0
     fal_output_hosts: str = "v3.fal.media,v3b.fal.media"
-    drift_scorer_command: str | None = None
-    drift_scorer_timeout_seconds: float = 120.0
 
     artifact_storage_backend: Literal["filesystem", "s3"] = "filesystem"
     artifact_storage_path: Path = Path(".data/artifacts")

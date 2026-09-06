@@ -55,7 +55,7 @@ def mask_png(mask: MaskSnapshot) -> bytes:
 
 def composite_masked_output(
     *, original: bytes, generated: bytes, mask: MaskSnapshot
-) -> tuple[bytes, float]:
+) -> bytes:
     subject = Image.open(BytesIO(original)).convert("RGBA")
     if subject.size != (mask.width, mask.height):
         raise ValueError("Area selection dimensions no longer match the input image")
@@ -72,9 +72,6 @@ def composite_masked_output(
     result = Image.composite(
         output, subject, Image.fromarray(np.rint(alpha * 255).astype(np.uint8))
     )
-    outside_band = distance > FEATHER_PX
-    delta = np.abs(np.asarray(result).astype(np.int16) - np.asarray(subject))
-    drift = float(delta[outside_band].mean() / 255) if outside_band.any() else 0.0
     buffer = BytesIO()
     result.save(buffer, format="PNG")
-    return buffer.getvalue(), drift
+    return buffer.getvalue()
