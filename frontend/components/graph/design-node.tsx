@@ -11,6 +11,7 @@ import { NodeFrame, NodeHandle } from "./node-frame";
 import { PromptEditor } from "./prompt-editor";
 import { VersionStrip } from "./version-strip";
 import { RunProgress } from "./run-progress";
+import { Skeleton } from "./skeleton";
 import { SaveStatus } from "./save-status";
 import { Icon, IconButton } from "./icon";
 import { OverflowMenu } from "./overflow-menu";
@@ -85,6 +86,14 @@ export const DesignNode = memo(function DesignNode({
         </>
       }
     >
+      {data.run.status === "running" && !preview ? (
+        <div className="image-preview relative overflow-hidden rounded-md" aria-busy>
+          <Skeleton className="aspect-[4/3] w-full rounded-md" />
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-white/80 to-transparent px-2 py-1.5">
+            <RunProgress run={data.run} />
+          </div>
+        </div>
+      ) : null}
       {preview ? (
         <div className="image-preview group relative overflow-hidden rounded-md bg-white">
           <button
@@ -249,9 +258,7 @@ export const DesignNode = memo(function DesignNode({
               : "Describe a design…"
         }
         footer={
-          data.run.status === "running" ? (
-            <RunProgress run={data.run} />
-          ) : !result ? (
+          data.run.status === "running" ? null : !result ? (
             <button
               className="run-button nodrag text-white disabled:bg-neutral-300"
               disabled={!!blocked}

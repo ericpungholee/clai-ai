@@ -319,11 +319,28 @@ summary:focus-visible,
 .subject-chip[data-highlighted="true"] {
   outline-color: var(--wire-subject);
 }
+.skeleton {
+  background: linear-gradient(90deg, #e4ebf0 0%, #f4f8fb 42%, #e4ebf0 84%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .subject-dock,
-  .preview-toolbar {
+  .preview-toolbar,
+  .skeleton {
     transition: none;
     animation: none;
+  }
+  .skeleton {
+    background: #e4ebf0;
   }
 }
 

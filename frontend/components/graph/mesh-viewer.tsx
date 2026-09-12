@@ -5,6 +5,7 @@ import type { MeshDecal, DecalPlacement } from "@/lib/mesh-decals";
 import type { MeshScene } from "@/lib/mesh-scene";
 import { MeshLogoEditor } from "./mesh-logo-editor";
 import { DownloadButton } from "./download-button";
+import { Skeleton } from "./skeleton";
 import type { Version } from "@/lib/graph";
 import { requestMesh, type MeshData } from "@/lib/meshes";
 
@@ -30,7 +31,6 @@ export function MeshViewer({
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [seconds, setSeconds] = useState(0);
   const previewCallback = useRef(onPreview);
   useEffect(() => {
     previewCallback.current = onPreview;
@@ -56,7 +56,6 @@ export function MeshViewer({
     if (!waiting) return;
     let alive = true;
     const timer = setInterval(() => {
-      setSeconds((value) => value + 2);
       requestMesh(projectId, version.id)
         .then((mesh) => {
           if (alive) setState({ status: "ready", mesh });
@@ -77,7 +76,6 @@ export function MeshViewer({
   const create = async () => {
     if (state.status === "submitting") return;
     setState({ status: "submitting" });
-    setSeconds(0);
     try {
       setState({
         status: "ready",
@@ -126,6 +124,34 @@ export function MeshViewer({
             decal={decals[mesh.attempt_id] ?? null}
             onChange={(decal) => onDecalChange(mesh.attempt_id, decal)}
           />
+        ) : waiting ||
+          state.status === "loading" ||
+          state.status === "submitting" ? (
+          <div className="relative h-full w-full" aria-busy>
+            <Skeleton className="h-full w-full rounded-lg" />
+            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-white/85 to-transparent px-4 pb-4 pt-8 text-center">
+              {waiting ? (
+                <div role="status">
+                  <p className="text-sm text-neutral-600">
+                    {mesh.status === "queued"
+                      ? "Queued"
+                      : mesh.status === "ingesting"
+                        ? "Saving"
+                        : "Generating"}
+                  </p>
+                  <p className="mt-1 text-sm text-neutral-600">
+                    Safe to close — this keeps running.
+                  </p>
+                </div>
+              ) : (
+                <p role="status" className="text-sm text-neutral-600">
+                  {state.status === "loading"
+                    ? "Checking saved 3D image…"
+                    : "Queueing one 3D generation…"}
+                </p>
+              )}
+            </div>
+          </div>
         ) : (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -134,41 +160,19 @@ export function MeshViewer({
               alt="Image used for this image’s 3D view"
               className="mb-5 max-h-[45%] max-w-[60%] rounded object-contain"
             />
-            {waiting ? (
-              <div role="status" className="text-center">
-                <p>
-                  {mesh.status === "queued"
-                    ? "Queued"
-                    : mesh.status === "ingesting"
-                      ? "Saving"
-                      : "Generating"}{" "}
-                  · {seconds}s
+            <div className="max-w-lg text-center">
+              {state.status === "error" || mesh?.status === "failed" ? (
+                <p role="alert" className="mb-3 text-sm text-red-700">
+                  {state.status === "error" ? state.message : mesh?.error}
                 </p>
-                <p className="mt-2 text-sm text-neutral-600">
-                  Safe to close — this keeps running.
-                </p>
-              </div>
-            ) : state.status === "loading" || state.status === "submitting" ? (
-              <p role="status">
-                {state.status === "loading"
-                  ? "Checking saved 3D image…"
-                  : "Queueing one 3D generation…"}
-              </p>
-            ) : (
-              <div className="max-w-lg text-center">
-                {state.status === "error" || mesh?.status === "failed" ? (
-                  <p role="alert" className="mb-3 text-sm text-red-700">
-                    {state.status === "error" ? state.message : mesh?.error}
-                  </p>
-                ) : null}
-                <button
-                  onClick={create}
-                  className="mt-4 rounded bg-neutral-900 px-4 py-2 text-sm font-bold text-white"
-                >
-                  {mesh?.status === "failed" ? "Retry" : "Generate"} 3D
-                </button>
-              </div>
-            )}
+              ) : null}
+              <button
+                onClick={create}
+                className="mt-4 rounded bg-neutral-900 px-4 py-2 text-sm font-bold text-white"
+              >
+                {mesh?.status === "failed" ? "Retry" : "Generate"} 3D
+              </button>
+            </div>
           </>
         )}
       </main>
