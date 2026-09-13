@@ -501,15 +501,6 @@ createServer(async (request, response) => {
     response.end("{}");
     return;
   }
-  if (path === "/image-views") {
-    const version = graph.nodes.flatMap((node) => node.versions).find((v) => v.id === (body?.version_id ?? "subject"))!;
-    version.views = Object.fromEntries((["right", "back", "left"] as const).map((angle) => [angle, {
-      status: body?.state === "pending" ? "provider_pending" : body?.state === "partial" && angle === "back" ? "failed" : "complete",
-      image_url: body?.state === "pending" || body?.state === "partial" && angle === "back" ? null : `http://127.0.0.1:8109/artifacts/subject.svg?angle=${angle}&version=${version.id}`,
-    }]));
-    response.end("{}");
-    return;
-  }
   if (path === "/large-canvas") {
     const source = fixture().nodes[0];
     graph.nodes = Array.from({ length: 50 }, (_, index) => ({

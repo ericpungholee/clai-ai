@@ -18,9 +18,6 @@ class Settings(BaseSettings):
     fal_key: SecretStr | None = None
     fal_timeout_seconds: float = 120.0
     fal_output_hosts: str = "v3.fal.media,v3b.fal.media"
-    # Demo switch: multi-angle jobs use TRELLIS-2's native image_urls input.
-    trellis_enable_multi_image: bool = True
-    trellis_preset: Literal["high_quality"] = "high_quality"
 
     artifact_storage_backend: Literal["filesystem", "s3"] = "filesystem"
     artifact_storage_path: Path = Path(".data/artifacts")

@@ -16,12 +16,6 @@ export type NodeSettings = {
   whiteBackground: boolean;
 };
 
-export type ImageAngle = "front" | "right" | "back" | "left";
-export type ImageVersionView = {
-  image_url: string | null;
-  status: "queued" | "dispatching" | "provider_pending" | "ingesting" | "complete" | "failed";
-};
-
 export type Version = {
   id: string;
   node_id: string;
@@ -40,7 +34,6 @@ export type Version = {
   };
   prompt_at_runtime: string;
   edit_depth: number;
-  views?: Partial<Record<ImageAngle, ImageVersionView>>;
   branch_node_ids: string[];
 };
 

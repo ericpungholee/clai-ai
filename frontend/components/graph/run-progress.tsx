@@ -14,9 +14,7 @@ export function RunProgress({
         : stage === "provider_pending"
           ? "Generating"
           : stage === "ingesting"
-            ? run.job?.version_id
-              ? "Generating image angles"
-              : "Saving image"
+            ? "Saving image"
             : "Saving draft";
   return (
     <p role="status" className="text-xs text-neutral-500">

@@ -19,7 +19,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 from app.domain.prompts import PromptPart
@@ -145,62 +145,6 @@ class Version(Base):
     input_snapshot: Mapped[dict[str, object]] = mapped_column(json_type)
     prompt_at_runtime: Mapped[str] = mapped_column(Text)
     edit_depth: Mapped[int] = mapped_column(Integer)
-    image_views: Mapped[list["VersionImageView"]] = relationship(
-        "VersionImageView",
-        viewonly=True,
-    )
-
-
-class VersionImageView(Base):
-    __tablename__ = "version_image_views"
-    __table_args__ = (
-        CheckConstraint(
-            "angle IN ('right', 'back', 'left')", name="ck_version_image_views_angle"
-        ),
-        CheckConstraint(
-            "status IN ('queued', 'dispatching', 'provider_pending', "
-            "'ingesting', 'complete', 'failed')",
-            name="ck_version_image_views_status",
-        ),
-        CheckConstraint(
-            "status <> 'complete' OR artifact_url IS NOT NULL",
-            name="ck_version_image_views_complete_artifact",
-        ),
-    )
-
-    version_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("versions.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    angle: Mapped[str] = mapped_column(String(16), primary_key=True)
-    artifact_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
-    artifact_storage_key: Mapped[str | None] = mapped_column(
-        String(2048), nullable=True
-    )
-    artifact_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    artifact_content_type: Mapped[str | None] = mapped_column(
-        String(120), nullable=True
-    )
-    status: Mapped[str] = mapped_column(
-        String(32), default="queued", server_default="queued"
-    )
-    error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source_artifact_url: Mapped[str] = mapped_column(String(2048))
-    request_payload: Mapped[dict[str, object]] = mapped_column(json_type, default=dict)
-    provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    model: Mapped[str | None] = mapped_column(String(160), nullable=True)
-    endpoint: Mapped[str | None] = mapped_column(String(240), nullable=True)
-    provider_request_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-    started_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
 
 
 class GraphEdge(Base):
@@ -314,7 +258,6 @@ class VersionMesh(Base):
         Uuid(as_uuid=True), default=uuid.uuid4
     )
     source_artifact_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
-    source_image_urls: Mapped[list[str]] = mapped_column(json_type, default=list)
     request_payload: Mapped[dict[str, object]] = mapped_column(json_type, default=dict)
     provider_request_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

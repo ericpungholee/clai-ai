@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.graph import GraphEdge, GraphNode, RunJob, Version
@@ -36,7 +36,6 @@ from app.services.graph_service import (
     replace_subject_edge,
     serialize_edge,
     serialize_node,
-    serialize_run_job_record,
     update_node,
     update_prompt,
 )
@@ -116,7 +115,6 @@ def patch_node(
             db.scalars(
                 select(Version)
                 .where(Version.node_id == node.id)
-                .options(selectinload(Version.image_views))
                 .order_by(Version.created_at, Version.id)
             )
         )
@@ -342,12 +340,20 @@ def serialize_run_job(job_id: uuid.UUID, db: Session) -> RunJobData:
     job = db.get(RunJob, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    version = db.scalar(
-        select(Version)
-        .where(Version.run_job_id == job.id)
-        .options(selectinload(Version.image_views))
+    version_id = db.scalar(select(Version.id).where(Version.run_job_id == job.id))
+    return RunJobData(
+        id=job.id,
+        node_id=job.node_id,
+        status=job.status,
+        op=str(job.frozen_request["op"]),
+        attempts=job.attempts,
+        error=job.error,
+        version_id=version_id,
+        created_at=job.created_at,
+        completed_at=job.completed_at,
+        provider_elapsed_seconds=job.provider_elapsed_seconds,
+        total_elapsed_seconds=job.total_elapsed_seconds,
     )
-    return serialize_run_job_record(job, version)
 
 
 @router.delete("/{project_id}/nodes/{node_id}", status_code=204)

@@ -60,10 +60,6 @@ Submitting a run resolves its exact subject, references, mask, prompt, settings,
 
 Provider files are validated and copied into Clai-owned storage before the result is committed. The default filesystem backend works without cloud infrastructure. S3-compatible storage is available through the variables documented in [.env.example](.env.example).
 
-Each image run saves the primary/front image first, then asynchronously generates right, back, and left views from that primary file and the frozen design prompt. The four separate files belong to the same image version; the canvas can show the primary while the run remains labeled as generating angles, and Inspect result opens a live angle gallery. New versions cannot start 3D conversion until all four files are complete. Conversion uses [fal-ai/trellis-2/multi](https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/trellis-2/multi) with exactly four separate `image_urls` in front/right/back/left order and the demo `high_quality` settings (1536 resolution, 4096 texture, 12 sampling steps). Every 3D request logs its model, multi-image flag, image count, URLs, resolution, texture size, and sampling steps. Historical versions with no angle rows retain the existing Tripo single-image path.
-
-For an already-running local stack, apply `make migrate` and restart the worker with `docker compose restart worker` after updating the code. The migration preserves existing rear artifacts as back views. Older single-image versions are not automatically backfilled. Each new image adds three image-edit calls; exact identity and unseen details remain model-dependent. See [the demo pipeline notes](docs/multi-angle-demo.md) for schema, request shape, verification, and limitations.
-
 See [architecture.md](architecture.md) for the data model, provider routing, concurrency rules, storage boundaries, and known operational limits.
 
 ## Development

@@ -661,44 +661,81 @@ def test_navy_shoe_path_runs_end_to_end_on_postgres_with_fake_provider(
         app.dependency_overrides.clear()
 
 
-def test_angle_migration_preserves_saved_rear_and_frozen_mesh_inputs(postgres_engine):
-    migrate(postgres_engine, "c8e4f1a09b3d")
+def test_multi_angle_cleanup_preserves_core_version_and_mesh_rows(
+    postgres_engine: Engine,
+) -> None:
+    migrate(postgres_engine, "d2b9a71f403e")
     with postgres_engine.begin() as connection:
-        project = insert_project(connection)
-        node = insert_node(connection, project)
-        version = insert_version(connection, project, node)
+        project_id = insert_project(connection)
+        node_id = insert_node(connection, project_id)
+        version_id = insert_version(connection, project_id, node_id)
         connection.execute(
-            text("""
-            INSERT INTO version_rear_images
-                (version_id, status, source_artifact_url, artifact_url)
-            VALUES (:version, 'complete', 'https://cdn.test/shoe.png', 'https://cdn.test/back.png')
-        """),
-            {"version": version},
+            text(
+                """
+                INSERT INTO version_image_views (
+                    version_id, angle, status, source_artifact_url, artifact_url
+                ) VALUES (
+                    :version, 'back', 'complete',
+                    'https://cdn.test/shoe.png', 'https://cdn.test/back.png'
+                )
+                """
+            ),
+            {"version": version_id},
         )
         connection.execute(
-            text("""
-            INSERT INTO version_meshes (version_id, provider, model, status, attempt_id,
-                source_artifact_url, source_rear_artifact_url,
-                provider_response_metadata)
-            VALUES (:version, 'fal', 'fal-ai/trellis-2', 'queued', :attempt,
-                'https://cdn.test/shoe.png', 'https://cdn.test/back.png', '{}'::jsonb)
-        """),
-            {"version": version, "attempt": uuid.uuid4()},
+            text(
+                """
+                INSERT INTO version_meshes (
+                    version_id, provider, model, status, attempt_id,
+                    source_artifact_url, source_image_urls,
+                    provider_response_metadata
+                ) VALUES (
+                    :version, 'fal', 'fal-ai/trellis-2/multi', 'queued', :attempt,
+                    'https://cdn.test/shoe.png',
+                    '["https://cdn.test/shoe.png", "https://cdn.test/back.png"]'::jsonb,
+                    '{}'::jsonb
+                )
+                """
+            ),
+            {"version": version_id, "attempt": uuid.uuid4()},
         )
+
     migrate(postgres_engine)
-    with postgres_engine.begin() as connection:
-        assert connection.execute(
-            text("SELECT angle, artifact_url FROM version_image_views")
-        ).one() == ("back", "https://cdn.test/back.png")
-        assert connection.scalar(
-            text("SELECT source_image_urls FROM version_meshes")
-        ) == ["https://cdn.test/shoe.png", "https://cdn.test/back.png"]
-        for angle in ("right", "left"):
-            connection.execute(
-                text("""
-                INSERT INTO version_image_views (version_id, angle, source_artifact_url)
-                VALUES (:version, :angle, 'https://cdn.test/shoe.png')
-            """),
-                {"version": version, "angle": angle},
+
+    with postgres_engine.connect() as connection:
+        assert (
+            connection.scalar(
+                text("SELECT count(*) FROM projects WHERE id = :id"),
+                {"id": project_id},
             )
-        assert connection.scalar(text("SELECT count(*) FROM version_image_views")) == 3
+            == 1
+        )
+        assert (
+            connection.scalar(
+                text("SELECT count(*) FROM versions WHERE id = :id"),
+                {"id": version_id},
+            )
+            == 1
+        )
+        mesh = connection.execute(
+            text(
+                "SELECT status, source_artifact_url FROM version_meshes "
+                "WHERE version_id = :id"
+            ),
+            {"id": version_id},
+        ).one()
+        assert mesh == ("queued", "https://cdn.test/shoe.png")
+        assert (
+            connection.scalar(text("SELECT to_regclass('version_image_views')")) is None
+        )
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT count(*) FROM information_schema.columns "
+                    "WHERE table_schema = current_schema() "
+                    "AND table_name = 'version_meshes' "
+                    "AND column_name = 'source_image_urls'"
+                )
+            )
+            == 0
+        )

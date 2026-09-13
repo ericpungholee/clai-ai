@@ -8,12 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.api.graph import get_project_or_404
 from app.core.database import get_db
-from app.models.graph import GraphNode, Version, VersionImageView, VersionMesh
-from app.providers.mesh import (
-    TRELLIS_ENDPOINT,
-    TRELLIS_HIGH_QUALITY,
-    recoverable_mesh_response,
-)
+from app.models.graph import GraphNode, Version, VersionMesh
 from app.providers.tripo import TRIPO_ENDPOINT
 
 router = APIRouter(
@@ -37,7 +32,6 @@ class MeshData(BaseModel):
     preview_url: str | None
     error: str | None
     elapsed_seconds: float | None
-    input_image_count: int = 1
 
 
 class MeshEnqueuer(Protocol):
@@ -56,9 +50,7 @@ def get_mesh_enqueuer() -> MeshEnqueuer:
 
 
 def mesh_data(mesh: VersionMesh) -> MeshData:
-    data = MeshData.model_validate(mesh, from_attributes=True)
-    data.input_image_count = max(1, len(mesh.source_image_urls or []))
-    return data
+    return MeshData.model_validate(mesh, from_attributes=True)
 
 
 def source_image(project_id: uuid.UUID, version_id: uuid.UUID, db: Session) -> str:
@@ -70,36 +62,6 @@ def source_image(project_id: uuid.UUID, version_id: uuid.UUID, db: Session) -> s
     if url is None:
         raise HTTPException(404, "Image not found")
     return url
-
-
-def complete_image_urls(
-    db: Session, version_id: uuid.UUID, front_url: str
-) -> list[str]:
-    rows = list(
-        db.scalars(
-            select(VersionImageView).where(VersionImageView.version_id == version_id)
-        )
-    )
-    # Versions created before the multi-angle demo have no angle rows and keep
-    # their existing single-image path. New versions must never freeze a partial
-    # set into a 3D job.
-    if not rows:
-        return [front_url]
-    views = {view.angle: view for view in rows}
-    expected = ("right", "back", "left")
-    if set(views) != set(expected) or any(
-        views[angle].status != "complete" or not views[angle].artifact_url
-        for angle in expected
-    ):
-        raise HTTPException(
-            409,
-            "3D generation starts after the front, right, back, and left "
-            "images are ready.",
-        )
-    urls = [front_url, *(views[angle].artifact_url for angle in expected)]
-    if len(set(urls)) != 4:
-        raise HTTPException(409, "3D generation requires four distinct image files.")
-    return urls
 
 
 @router.get("", response_model=MeshData | None)
@@ -124,78 +86,34 @@ def create_mesh(
     source_url = source_image(project_id, version_id, db)
     # Serialize creation and upgrades even before this version has a cache row.
     db.execute(select(Version.id).where(Version.id == version_id).with_for_update())
-    image_urls = complete_image_urls(db, version_id, source_url)
-    target_model = TRELLIS_ENDPOINT if len(image_urls) > 1 else TRIPO_ENDPOINT
-    if len(image_urls) > 1:
-        # TRELLIS-2 multi always produces the textured high-quality demo output.
-        data.texture = "standard"
     mesh = db.get(VersionMesh, version_id)
-    reuse_provider_result = False
     if mesh:
         upgrade_texture = (
             mesh.status == "complete"
             and mesh.texture == "no"
             and data.texture == "standard"
         )
-        upgrade_views = (
-            mesh.status == "complete"
-            and len(image_urls) > 1
-            and mesh.source_image_urls != image_urls
-        )
-        upgrade_model = (
-            mesh.status == "complete"
-            and len(image_urls) > 1
-            and (
-                mesh.model != TRELLIS_ENDPOINT
-                or any(
-                    mesh.request_payload.get(field)
-                    != getattr(TRELLIS_HIGH_QUALITY, field)
-                    for field in (
-                        "resolution",
-                        "texture_size",
-                        "ss_sampling_steps",
-                        "shape_slat_sampling_steps",
-                        "tex_slat_sampling_steps",
-                    )
-                )
-            )
-        )
         if mesh.attempt_id == data.attempt_id or (
-            mesh.status != "failed"
-            and not (upgrade_texture or upgrade_views or upgrade_model)
+            mesh.status != "failed" and not upgrade_texture
         ):
             return mesh_data(mesh)
-        if (upgrade_views or upgrade_model) and mesh.texture == "standard":
-            data.texture = "standard"
-        reuse_provider_result = (
-            mesh.status == "failed"
-            and mesh.model == target_model
-            and mesh.texture == data.texture
-            and mesh.source_image_urls == image_urls
-            and recoverable_mesh_response(mesh.provider_response_metadata) is not None
-        )
     if mesh is None:
-        mesh = VersionMesh(
-            version_id=version_id,
-            provider="fal",
-            model=target_model,
-        )
+        mesh = VersionMesh(version_id=version_id, provider="fal", model=TRIPO_ENDPOINT)
         db.add(mesh)
+    mesh.provider = "fal"
+    mesh.model = TRIPO_ENDPOINT
     mesh.attempt_id = data.attempt_id
     mesh.texture = data.texture
     mesh.status = "queued"
     mesh.source_artifact_url = source_url
-    mesh.source_image_urls = image_urls
-    mesh.model = target_model
     mesh.artifact_url = None
     mesh.preview_url = None
     mesh.error = None
     mesh.elapsed_seconds = None
     mesh.started_at = None
-    if not reuse_provider_result:
-        mesh.provider_request_id = None
-        mesh.provider_response_metadata = {}
-        mesh.request_payload = {}
+    mesh.provider_request_id = None
+    mesh.provider_response_metadata = {}
+    mesh.request_payload = {}
     db.commit()
     try:
         enqueuer.enqueue(version_id, data.attempt_id)

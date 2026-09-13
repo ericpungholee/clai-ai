@@ -8,14 +8,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import delete
 
 from app.api.meshes import get_mesh_enqueuer
 from app.main import app
-from app.models.graph import Version, VersionImageView, VersionMesh
+from app.models.graph import Version, VersionMesh
 from app.providers.base import ArtifactBytes
-from app.providers.mesh import TRELLIS_ENDPOINT, TRELLIS_HIGH_QUALITY, MeshProvider
-from app.providers.tripo import TRIPO_ENDPOINT
+from app.providers.tripo import TRIPO_ENDPOINT, TripoProvider
 from app.services.mesh_jobs import execute_mesh_job
 from app.services.run_queue import get_run_enqueuer
 from app.storage.artifacts import FileArtifactStore
@@ -69,23 +67,7 @@ class Reader:
                 "model.glb",
             )
         image = BytesIO()
-        Image.new(
-            "RGB",
-            (4, 4),
-            next(
-                (
-                    color
-                    for name, color in {
-                        "rear": "blue",
-                        "back": "blue",
-                        "right": "red",
-                        "left": "green",
-                    }.items()
-                    if name in artifact_url
-                ),
-                "grey",
-            ),
-        ).save(image, "WEBP")
+        Image.new("RGB", (4, 4), "grey").save(image, "WEBP")
         return ArtifactBytes(
             image.getvalue(), "application/octet-stream", "preview.webp"
         )
@@ -94,23 +76,18 @@ class Reader:
 class Transport:
     def __init__(self) -> None:
         self.submissions: list[dict[str, object]] = []
-        self.endpoints: list[str] = []
         self.uploads: list[bytes] = []
 
     def upload(self, *, content: bytes, filename: str) -> str:
         self.uploads.append(content)
-        return f"https://uploaded.fal.test/image-{len(self.uploads)}.png"
+        return "https://uploaded.fal.test/image.png"
 
     def submit(self, *, endpoint: str, payload: dict[str, object]) -> str:
-        self.endpoints.append(endpoint)
+        assert endpoint == TRIPO_ENDPOINT
         self.submissions.append(payload)
         return "fake-mesh-request"
 
     def result(self, *, endpoint: str, request_id: str) -> dict[str, object]:
-        if endpoint == TRELLIS_ENDPOINT:
-            return {
-                "model_glb": {"url": "https://provider.test/textured.glb"},
-            }
         return {
             "task_id": "fake",
             "model_mesh": {"url": "https://provider.test/model.glb"},
@@ -124,83 +101,12 @@ class Transport:
         }
 
 
-def test_trellis_two_result_accepts_native_model_glb(tmp_path: Path) -> None:
-    stored = ingest_mesh(
-        response={"model_glb": {"url": "https://provider.test/textured.glb"}},
-        reader=Reader(),
-        store=FileArtifactStore(root=tmp_path, public_base_url="https://clai.test"),
-        attempt_id="trellis-two",
-        textured=True,
-    )
-    assert stored.model.artifact_url.endswith("/model.glb")
-
-
-def test_trellis_two_accepts_embedded_webp_texture_extension() -> None:
-    document = textured_document()
-    for texture in document["textures"]:
-        texture["extensions"] = {"EXT_texture_webp": {"source": texture.pop("source")}}
-    document["extensionsUsed"] = ["EXT_texture_webp"]
-
-    validate_glb(glb(document), require_texture=True)
-
-
-def test_trellis_two_uses_native_four_image_high_quality_payload() -> None:
-    transport = Transport()
-    provider = MeshProvider(transport, Reader())
-    urls = [
-        f"https://clai.test/{angle}.png" for angle in ("front", "right", "back", "left")
-    ]
-
-    prepared = provider.prepare(source_url=urls[0], image_urls=urls)
-
-    assert prepared.endpoint == "fal-ai/trellis-2/multi"
-    assert prepared.payload == {
-        "resolution": TRELLIS_HIGH_QUALITY.resolution,
-        "texture_size": TRELLIS_HIGH_QUALITY.texture_size,
-        "ss_sampling_steps": TRELLIS_HIGH_QUALITY.ss_sampling_steps,
-        "shape_slat_sampling_steps": TRELLIS_HIGH_QUALITY.shape_slat_sampling_steps,
-        "tex_slat_sampling_steps": TRELLIS_HIGH_QUALITY.tex_slat_sampling_steps,
-        "image_urls": [
-            "https://uploaded.fal.test/image-1.png",
-            "https://uploaded.fal.test/image-2.png",
-            "https://uploaded.fal.test/image-3.png",
-            "https://uploaded.fal.test/image-4.png",
-        ],
-    }
-    assert "image_url" not in prepared.payload
-
-
-def test_trellis_two_rejects_multi_angle_when_feature_flag_is_disabled() -> None:
-    provider = MeshProvider(Transport(), Reader(), multi_image_enabled=False)
-    with pytest.raises(ValueError, match="TRELLIS_ENABLE_MULTI_IMAGE=true"):
-        provider.prepare(
-            source_url="https://clai.test/front.png",
-            image_urls=["https://clai.test/front.png", "https://clai.test/back.png"],
-        )
-
-
-@pytest.mark.parametrize("view_count", [2, 3])
-def test_trellis_two_rejects_partial_multi_image_sets(view_count: int) -> None:
-    provider = MeshProvider(Transport(), Reader())
-    urls = [f"https://clai.test/view-{index}.png" for index in range(view_count)]
-
-    with pytest.raises(ValueError, match="exactly four distinct views"):
-        provider.prepare(source_url=urls[0], image_urls=urls)
-
-
 class Queue:
     def __init__(self) -> None:
         self.calls: list[tuple[uuid.UUID, uuid.UUID]] = []
 
     def enqueue(self, version_id: uuid.UUID, attempt_id: uuid.UUID) -> None:
         self.calls.append((version_id, attempt_id))
-
-
-def mark_as_legacy_single_view(version_id: uuid.UUID) -> None:
-    with TestingSessionLocal.begin() as db:
-        db.execute(
-            delete(VersionImageView).where(VersionImageView.version_id == version_id)
-        )
 
 
 def test_mesh_is_a_version_cache_with_uploaded_input_and_ingested_assets(
@@ -213,7 +119,6 @@ def test_mesh_is_a_version_cache_with_uploaded_input_and_ingested_assets(
     _, first = submit_and_execute(
         client, project, str(node["id"]), image_queue, image_provider
     )
-    mark_as_legacy_single_view(first)
     another = create_node(client, project, prompt="Another lamp")
     _, second = submit_and_execute(
         client, project, str(another["id"]), image_queue, image_provider
@@ -241,7 +146,7 @@ def test_mesh_is_a_version_cache_with_uploaded_input_and_ingested_assets(
         version_id=first,
         attempt_id=attempt,
         session_factory=TestingSessionLocal,
-        provider=MeshProvider(transport, source_reader),
+        provider=TripoProvider(transport, source_reader),
         output_reader=output_reader,
         store=FileArtifactStore(
             root=tmp_path, public_base_url="https://clai.test/assets"
@@ -250,17 +155,18 @@ def test_mesh_is_a_version_cache_with_uploaded_input_and_ingested_assets(
     execute_mesh_job(**arguments)
     execute_mesh_job(**arguments)
     assert len(transport.submissions) == 1
-    assert transport.endpoints == [TRIPO_ENDPOINT]
     payload = transport.submissions[0]
-    assert payload["texture"] == "standard" and payload["pbr"] is True
-    assert payload["texture_alignment"] == "original_image"
-    assert payload["orientation"] == "align_image"
-    assert payload["image_url"] == "https://uploaded.fal.test/image-1.png"
+    assert payload == {
+        "image_url": "https://uploaded.fal.test/image.png",
+        "texture": "standard",
+        "pbr": True,
+        "texture_alignment": "original_image",
+        "orientation": "align_image",
+    }
+    assert "image_urls" not in payload
     with TestingSessionLocal() as db:
         source_url = db.get(Version, first).artifact_url
-        mesh = db.get(VersionMesh, first)
-        assert mesh.source_artifact_url == source_url
-        assert mesh.source_image_urls == [source_url]
+        assert db.get(VersionMesh, first).source_artifact_url == source_url
     assert source_reader.urls == [source_url]
     assert transport.uploads == [Reader().read(source_url).content]
     assert output_reader.urls[0] == "https://provider.test/textured.glb"
@@ -290,11 +196,10 @@ def test_mesh_is_a_version_cache_with_uploaded_input_and_ingested_assets(
         ).json()
         == cached
     )
-    untextured = MeshProvider(transport, Reader()).prepare(
+    untextured = TripoProvider(transport, Reader()).prepare(
         source_url="https://clai.test/image.png", textured=False
     )
-    assert untextured.endpoint == TRIPO_ENDPOINT
-    assert untextured.payload["texture"] == "no" and untextured.payload["pbr"] is False
+    assert untextured["texture"] == "no" and untextured["pbr"] is False
 
 
 def test_grey_cache_can_be_upgraded_once_from_its_original_image(
@@ -307,7 +212,6 @@ def test_grey_cache_can_be_upgraded_once_from_its_original_image(
     _, version = submit_and_execute(
         client, project, str(node["id"]), image_queue, FakeProvider()
     )
-    mark_as_legacy_single_view(version)
     queue = Queue()
     app.dependency_overrides[get_mesh_enqueuer] = lambda: queue
     prefix = f"/api/projects/{project}/versions/{version}/mesh"
@@ -318,7 +222,7 @@ def test_grey_cache_can_be_upgraded_once_from_its_original_image(
     arguments = dict(
         version_id=version,
         session_factory=TestingSessionLocal,
-        provider=MeshProvider(transport, reader),
+        provider=TripoProvider(transport, reader),
         output_reader=Reader(),
         store=FileArtifactStore(root=tmp_path, public_base_url="https://clai.test"),
     )
@@ -358,7 +262,6 @@ def test_textured_job_rejects_grey_provider_output(
     _, version = submit_and_execute(
         client, project, str(node["id"]), image_queue, FakeProvider()
     )
-    mark_as_legacy_single_view(version)
     app.dependency_overrides[get_mesh_enqueuer] = Queue
     prefix = f"/api/projects/{project}/versions/{version}/mesh"
     attempt = uuid.uuid4()
@@ -373,7 +276,7 @@ def test_textured_job_rejects_grey_provider_output(
             version_id=version,
             attempt_id=attempt,
             session_factory=TestingSessionLocal,
-            provider=MeshProvider(GreyTransport(), Reader()),
+            provider=TripoProvider(GreyTransport(), Reader()),
             output_reader=Reader(),
             store=FileArtifactStore(root=tmp_path, public_base_url="https://clai.test"),
         )
@@ -412,7 +315,6 @@ def test_mesh_failure_cannot_invalidate_its_image(
     _, version = submit_and_execute(
         client, project, str(node["id"]), image_queue, FakeProvider()
     )
-    mark_as_legacy_single_view(version)
     queue = Queue()
     app.dependency_overrides[get_mesh_enqueuer] = lambda: queue
     prefix = f"/api/projects/{project}/versions/{version}/mesh"
@@ -430,7 +332,7 @@ def test_mesh_failure_cannot_invalidate_its_image(
             version_id=version,
             attempt_id=attempt,
             session_factory=TestingSessionLocal,
-            provider=MeshProvider(BrokenTransport(), Reader()),
+            provider=TripoProvider(BrokenTransport(), Reader()),
             output_reader=Reader(),
             store=FileArtifactStore(root=tmp_path, public_base_url="https://clai.test"),
         )
@@ -443,68 +345,15 @@ def test_mesh_failure_cannot_invalidate_its_image(
         == "failed"
     )
     assert len(queue.calls) == 1
+    with TestingSessionLocal.begin() as db:
+        db.get(VersionMesh, version).model = "retired/multi-image"
     assert (
         client.post(prefix, json={"attempt_id": str(uuid.uuid4())}).json()["status"]
         == "queued"
     )
     assert len(queue.calls) == 2
-
-
-def test_ingestion_retry_reuses_completed_provider_result(
-    client: TestClient, tmp_path: Path
-) -> None:
-    project = create_project(client)
-    node = create_node(client, project, prompt="Lamp")
-    image_queue = CapturingEnqueuer()
-    app.dependency_overrides[get_run_enqueuer] = lambda: image_queue
-    _, version = submit_and_execute(
-        client, project, str(node["id"]), image_queue, FakeProvider()
-    )
-    mark_as_legacy_single_view(version)
-    queue = Queue()
-    app.dependency_overrides[get_mesh_enqueuer] = lambda: queue
-    prefix = f"/api/projects/{project}/versions/{version}/mesh"
-    first_attempt = uuid.uuid4()
-    client.post(prefix, json={"attempt_id": str(first_attempt)})
-
-    class FailsOnceReader(Reader):
-        def __init__(self) -> None:
-            super().__init__()
-            self.failed = False
-
-        def read(self, artifact_url: str) -> ArtifactBytes:
-            if artifact_url.endswith(".glb") and not self.failed:
-                self.failed = True
-                raise OSError("temporary storage read failure")
-            return super().read(artifact_url)
-
-    transport = Transport()
-    output_reader = FailsOnceReader()
-    arguments = dict(
-        version_id=version,
-        session_factory=TestingSessionLocal,
-        provider=MeshProvider(transport, Reader()),
-        output_reader=output_reader,
-        store=FileArtifactStore(root=tmp_path, public_base_url="https://clai.test"),
-    )
-    with pytest.raises(OSError, match="temporary"):
-        execute_mesh_job(attempt_id=first_attempt, **arguments)
     with TestingSessionLocal() as db:
-        failed = db.get(VersionMesh, version)
-        assert failed.status == "failed"
-        assert failed.provider_response_metadata["provider_response"]["pbr_model"]
-    assert len(transport.submissions) == 1
-
-    retry_attempt = uuid.uuid4()
-    retried = client.post(prefix, json={"attempt_id": str(retry_attempt)}).json()
-    assert retried["status"] == "queued"
-    execute_mesh_job(attempt_id=retry_attempt, **arguments)
-
-    assert len(transport.submissions) == 1
-    with TestingSessionLocal() as db:
-        complete = db.get(VersionMesh, version)
-        assert complete.status == "complete"
-        assert complete.provider_response_metadata["reused_provider_result"] is True
+        assert db.get(VersionMesh, version).model == TRIPO_ENDPOINT
 
 
 def test_glb_must_not_reference_expiring_external_assets() -> None:

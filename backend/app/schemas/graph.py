@@ -23,13 +23,6 @@ class NodeSettingsData(BaseModel):
     whiteBackground: bool = True
 
 
-class ImageViewData(BaseModel):
-    image_url: str | None = None
-    status: Literal[
-        "queued", "dispatching", "provider_pending", "ingesting", "complete", "failed"
-    ]
-
-
 class VersionData(BaseModel):
     id: uuid.UUID
     node_id: uuid.UUID
@@ -44,9 +37,6 @@ class VersionData(BaseModel):
     input_snapshot: dict[str, JsonValue]
     prompt_at_runtime: str
     edit_depth: int
-    views: dict[Literal["front", "right", "back", "left"], ImageViewData] = Field(
-        default_factory=dict
-    )
     branch_node_ids: list[uuid.UUID] = Field(default_factory=list)
 
 

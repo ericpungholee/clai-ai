@@ -164,8 +164,7 @@ def test_graph_rehydrates_durable_run_and_locks_the_draft(
     )
     graph = client.get(f"/api/projects/{project}/graph").json()
     assert graph["nodes"][0]["prompt"] == "First frozen instruction"
-    assert graph["nodes"][0]["run"]["status"] == "ingesting"
-    assert graph["nodes"][0]["run"]["version_id"] is not None
+    assert graph["nodes"][0]["run"]["status"] == "complete"
     assert graph["nodes"][0]["versions"][0]["prompt_at_runtime"].startswith(
         "First frozen instruction"
     )

@@ -4,7 +4,6 @@ from app.models.graph import (
     GraphNode,
     RunJob,
     Version,
-    VersionImageView,
     VersionMesh,
 )
 from app.models.project import Project
@@ -17,5 +16,4 @@ __all__ = [
     "RunJob",
     "Version",
     "VersionMesh",
-    "VersionImageView",
 ]

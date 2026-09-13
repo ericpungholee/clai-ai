@@ -6,7 +6,6 @@ type MeshIdentity = {
   texture: "no" | "standard";
   preview_url: string | null;
   elapsed_seconds: number | null;
-  input_image_count?: number;
 };
 
 export type MeshData = MeshIdentity &

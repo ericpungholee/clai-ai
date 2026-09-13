@@ -50,14 +50,6 @@ export function MeshViewer({
     };
   }, [projectId, version.id]);
   const mesh = state.status === "ready" ? state.mesh : null;
-  const availableViews = 1 + (["right", "back", "left"] as const).filter(
-    (angle) => version.views?.[angle]?.status === "complete" && version.views[angle]?.image_url,
-  ).length;
-  const hasAnglePipeline = (["right", "back", "left"] as const).some(
-    (angle) => version.views?.[angle] !== undefined,
-  );
-  const anglesReady = !hasAnglePipeline || availableViews === 4;
-  const upgradeViews = mesh?.status === "complete" && availableViews > (mesh.input_image_count ?? 1);
   const waiting =
     mesh !== null && mesh.status !== "complete" && mesh.status !== "failed";
   useEffect(() => {
@@ -82,7 +74,7 @@ export function MeshViewer({
       previewCallback.current(version.id, mesh.preview_url);
   }, [mesh, version.id]);
   const create = async () => {
-    if (state.status === "submitting" || !anglesReady) return;
+    if (state.status === "submitting") return;
     setState({ status: "submitting" });
     try {
       setState({
@@ -174,36 +166,27 @@ export function MeshViewer({
                   {state.status === "error" ? state.message : mesh?.error}
                 </p>
               ) : null}
-              {!anglesReady ? (
-                <p role="status" className="mb-3 text-sm text-neutral-600">
-                  3D generation starts after all image angles finish.
-                </p>
-              ) : null}
               <button
                 onClick={create}
-                disabled={!anglesReady}
-                className="mt-4 rounded bg-neutral-900 px-4 py-2 text-sm font-bold text-white disabled:bg-neutral-300"
+                className="mt-4 rounded bg-neutral-900 px-4 py-2 text-sm font-bold text-white"
               >
-                {!anglesReady
-                  ? "Waiting for image angles"
-                  : `${mesh?.status === "failed" ? "Retry" : "Generate"} 3D`}
+                {mesh?.status === "failed" ? "Retry" : "Generate"} 3D
               </button>
             </div>
           </>
         )}
       </main>
-      {mesh?.status === "complete" && (mesh.texture === "no" || upgradeViews) ? (
+      {mesh?.status === "complete" && mesh.texture === "no" ? (
         <div className="mt-3 flex items-center justify-between gap-4 rounded bg-white p-3 text-sm">
           <p>
-            {upgradeViews
-              ? `This model used ${mesh.input_image_count ?? 1} view(s). More angles are now ready.`
-              : "This saved model contains only the shape. Generate colors and print."}
+            This saved model contains only the shape. Place the original logo
+            above, or optionally generate colors and print.
           </p>
           <button
             onClick={create}
             className="shrink-0 rounded bg-neutral-900 px-4 py-2 text-white"
           >
-            {upgradeViews ? `Regenerate with ${availableViews} views` : "Generate with colors & print"}
+            Generate with colors & print
           </button>
         </div>
       ) : null}

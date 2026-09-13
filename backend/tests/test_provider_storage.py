@@ -93,7 +93,7 @@ class FakeFalHandle:
 
     def get(self, *, interval: float) -> object:
         self.intervals.append(interval)
-        return {"model_glb": {"url": "https://provider.test/model.glb"}}
+        return {"pbr_model": {"url": "https://provider.test/model.glb"}}
 
 
 class FakeHandleFalClient(FakeFalClient):
@@ -251,10 +251,12 @@ def test_sdk_transport_throttles_queue_result_polling() -> None:
         queue_poll_interval_seconds=1.5,
     )
 
-    result = transport.result(endpoint="fal-ai/trellis-2/multi", request_id="request-1")
+    result = transport.result(
+        endpoint="tripo3d/tripo/v2.5/image-to-3d", request_id="request-1"
+    )
 
-    assert result["model_glb"] == {"url": "https://provider.test/model.glb"}
-    assert client.applications == [("fal-ai/trellis-2/multi", "request-1")]
+    assert result["pbr_model"] == {"url": "https://provider.test/model.glb"}
+    assert client.applications == [("tripo3d/tripo/v2.5/image-to-3d", "request-1")]
     assert client.handle.intervals == [1.5]
 
 
@@ -355,39 +357,6 @@ def test_generate_ref_uses_edit_endpoint_with_connect_images() -> None:
 
     assert job.endpoint == "fal-ai/nano-banana-pro/edit"
     assert job.request_payload["image_urls"] == ["https://v3.fal.media/input-1.png"]
-
-
-@pytest.mark.parametrize("angle", ["right", "back", "left"])
-def test_angle_view_uses_edit_endpoint_with_the_source_image_only(angle) -> None:
-    source = version("primary")
-    provider, transport, reader = provider_for((source,))
-
-    job = provider.execute_angle_view(
-        angle=angle,
-        source_url=source.artifact_url,
-        aspect_ratio="1:1",
-        resolution="1K",
-        seed=42,
-        white_background=True,
-        design_prompt="A blue deck with no exposed wood",
-    )
-
-    assert job.endpoint == "fal-ai/nano-banana-pro/edit"
-    assert reader.read_urls == [source.artifact_url]
-    assert job.request_payload["image_urls"] == ["https://v3.fal.media/input-1.png"]
-    assert {
-        "right": "right-side three-quarter view",
-        "back": "opposite/rear side",
-        "left": "left-side three-quarter view",
-    }[angle] in job.request_payload["prompt"]
-    assert job.request_payload["num_images"] == 1
-    assert "exactly one object" in job.request_payload["prompt"]
-    assert "same camera angle" not in job.request_payload["prompt"]
-    assert "A blue deck with no exposed wood" in job.request_payload["prompt"]
-    assert job.request_payload["prompt"].endswith(
-        "Place the object on a plain pure white background."
-    )
-    assert transport.submissions == [(job.endpoint, job.request_payload)]
 
 
 def test_provider_never_silently_drops_a_mask() -> None:
