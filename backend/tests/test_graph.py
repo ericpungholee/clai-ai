@@ -27,6 +27,7 @@ class FakeProvider:
 
     def __init__(self) -> None:
         self.requests: list[FrozenRunRequest] = []
+        self.view_requests: list[tuple[str, str]] = []
 
     def execute(self, request: FrozenRunRequest) -> ProviderJob:
         self.requests.append(request)
@@ -51,14 +52,30 @@ class FakeProvider:
             response_metadata={"fixture": True},
         )
 
+    def execute_views(
+        self, *, front_artifact_url: str, request: FrozenRunRequest
+    ) -> dict[str, ProviderJob]:
+        jobs = {}
+        for angle in ("left", "back", "right"):
+            self.view_requests.append((angle, front_artifact_url))
+            jobs[angle] = ProviderJob(
+                provider="fake",
+                model="fixture-image-v1",
+                endpoint=f"fake/view-{angle}",
+                request_id=f"fake-view-{angle}-{len(self.requests)}",
+                request_payload={"image_urls": [front_artifact_url]},
+            )
+        return jobs
+
 
 class FakeIngestor:
     def ingest(self, result: ProviderResult) -> StoredArtifact:
-        output_name = (
-            "same-shoe-navy.png"
-            if result.job.endpoint.endswith("edit_instruct")
-            else "original-shoe.png"
-        )
+        if "/view-" in result.job.endpoint:
+            output_name = f"{result.job.endpoint.rsplit('-', 1)[-1]}.png"
+        elif result.job.endpoint.endswith("edit_instruct"):
+            output_name = "same-shoe-navy.png"
+        else:
+            output_name = "original-shoe.png"
         return StoredArtifact(
             storage_key=f"fake/{output_name}",
             artifact_url=f"https://cdn.clai.test/{output_name}",
@@ -157,9 +174,8 @@ def test_white_background_defaults_for_new_nodes_and_freezes_per_version(
         client, project_id, str(node["id"]), enqueuer, provider
     )
     assert provider.requests[-1].settings.white_background is True
-    assert provider.requests[-1].prompt_at_runtime.endswith(
-        "Place the object on a plain pure white background."
-    )
+    assert "pure white background" in provider.requests[-1].prompt_at_runtime
+    assert "front view at eye level" in provider.requests[-1].prompt_at_runtime
 
     node = client.post(
         f"/api/projects/{project_id}/nodes/{node['id']}/duplicate",
@@ -175,7 +191,8 @@ def test_white_background_defaults_for_new_nodes_and_freezes_per_version(
         client, project_id, str(node["id"]), enqueuer, provider
     )
     assert provider.requests[-1].settings.white_background is False
-    assert provider.requests[-1].prompt_at_runtime == "A sculptural desk lamp"
+    assert "A sculptural desk lamp" in provider.requests[-1].prompt_at_runtime
+    assert "white background" not in provider.requests[-1].prompt_at_runtime
 
     graph = client.get(f"/api/projects/{project_id}/graph").json()
     versions = {
@@ -185,8 +202,8 @@ def test_white_background_defaults_for_new_nodes_and_freezes_per_version(
     }
     assert versions[str(first_version_id)]["params"]["whiteBackground"] is True
     assert versions[str(second_version_id)]["params"]["whiteBackground"] is False
-    assert versions[str(first_version_id)]["prompt_at_runtime"].endswith(
-        "Place the object on a plain pure white background."
+    assert (
+        "pure white background" in versions[str(first_version_id)]["prompt_at_runtime"]
     )
 
 
@@ -392,8 +409,9 @@ def test_commit_is_idempotent_at_version_boundary(client: TestClient) -> None:
     enqueuer = CapturingEnqueuer()
     app.dependency_overrides[get_run_enqueuer] = lambda: enqueuer
     node = create_node(client, project_id, prompt="A shoe")
+    provider = FakeProvider()
     _, version_id = submit_and_execute(
-        client, project_id, str(node["id"]), enqueuer, FakeProvider()
+        client, project_id, str(node["id"]), enqueuer, provider
     )
 
     with TestingSessionLocal() as db:
@@ -402,10 +420,24 @@ def test_commit_is_idempotent_at_version_boundary(client: TestClient) -> None:
                 select(Version).where(Version.node_id == uuid.UUID(str(node["id"])))
             )
         )
+        nodes = list(db.scalars(select(GraphNode)))
         edges = list(db.scalars(select(GraphEdge)))
 
     assert [version.id for version in versions] == [version_id]
+    assert [node.id for node in nodes] == [uuid.UUID(str(node["id"]))]
     assert edges == []
+    version = versions[0]
+    assert version.provider_response_metadata["views"] == {
+        "front": version.artifact_url,
+        "left": "https://cdn.clai.test/left.png",
+        "back": "https://cdn.clai.test/back.png",
+        "right": "https://cdn.clai.test/right.png",
+    }
+    assert provider.view_requests == [
+        ("left", version.artifact_url),
+        ("back", version.artifact_url),
+        ("right", version.artifact_url),
+    ]
 
 
 @pytest.mark.parametrize("enabled", [True, False])

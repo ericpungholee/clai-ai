@@ -24,11 +24,16 @@ from app.providers.base import (
     ProviderResult,
 )
 from app.providers.fal_transport import FalAccountError, FalSdkTransport
-from app.providers.nano_banana import NanoBananaProProvider
+from app.providers.nano_banana import (
+    VIEW_PROMPTS,
+    NanoBananaProProvider,
+)
+from app.providers.trellis import TrellisProvider
 from app.services.run_freezing import freeze_run_request
 from app.storage.artifacts import (
     ArtifactIngestor,
     ArtifactStorageError,
+    FileArtifactReader,
     FileArtifactStore,
     HttpArtifactReader,
     S3ArtifactStore,
@@ -195,6 +200,7 @@ def test_generate_uses_text_endpoint_without_uploads() -> None:
     job = provider.execute(request(Op.GENERATE))
 
     assert job.endpoint == "fal-ai/nano-banana-pro"
+    assert job.model == "gemini-3-pro-image"
     assert reader.read_urls == []
     assert transport.uploads == []
     assert transport.submissions == [
@@ -211,6 +217,80 @@ def test_generate_uses_text_endpoint_without_uploads() -> None:
                 "enable_web_search": False,
             },
         )
+    ]
+
+
+def test_view_generation_uses_front_for_three_separate_edit_requests() -> None:
+    front_url = "https://cdn.clai.test/front.png"
+    transport = FakeFalTransport()
+    reader = FakeArtifactReader(
+        {
+            front_url: ArtifactBytes(
+                content=b"front-image", content_type="image/png", filename="front.png"
+            )
+        }
+    )
+    provider = NanoBananaProProvider(transport=transport, artifact_reader=reader)
+
+    jobs = provider.execute_views(
+        front_artifact_url=front_url, request=request(Op.GENERATE)
+    )
+
+    assert list(jobs) == ["left", "back", "right"]
+    assert reader.read_urls == [front_url]
+    assert transport.uploads == [(b"front-image", "front.png")]
+    assert [endpoint for endpoint, _ in transport.submissions] == [
+        "fal-ai/nano-banana-pro/edit"
+    ] * 3
+    for (angle, expected_prompt), (_, payload) in zip(
+        VIEW_PROMPTS.items(), transport.submissions, strict=True
+    ):
+        assert angle in jobs
+        assert payload["prompt"] == expected_prompt
+        assert payload["image_urls"] == ["https://v3.fal.media/input-1.png"]
+        assert payload["num_images"] == 1
+
+
+def test_four_raw_outputs_are_stored_and_uploaded_to_trellis_unchanged(tmp_path):
+    raw_images = []
+    for color in ("red", "green", "blue", "yellow"):
+        output = BytesIO()
+        Image.new("RGB", (8, 8), color).save(output, "PNG")
+        raw_images.append(output.getvalue())
+    output_reader = FakeArtifactReader(
+        {
+            f"https://fal.test/{angle}.png": ArtifactBytes(
+                data, "image/png", f"{angle}.png"
+            )
+            for angle, data in zip(
+                ("front", "left", "back", "right"), raw_images, strict=True
+            )
+        }
+    )
+    store = FileArtifactStore(root=tmp_path, public_base_url="https://clai.test")
+    ingestor = ArtifactIngestor(reader=output_reader, store=store)
+    stored_urls = []
+    for angle, url in zip(
+        ("front", "left", "back", "right"), output_reader.artifacts, strict=True
+    ):
+        job = ProviderJob(
+            "fal",
+            "gemini-3-pro-image",
+            "fal-ai/nano-banana-pro/edit",
+            angle,
+            {},
+        )
+        result = ProviderResult(job, url, "image/png", 8, 8, {})
+        stored_urls.append(ingestor.ingest(result).artifact_url)
+
+    transport = FakeFalTransport()
+    reader = FileArtifactReader(root=tmp_path, public_base_url="https://clai.test")
+    payload = TrellisProvider(transport, reader).prepare(source_urls=stored_urls)
+
+    assert [reader.read(url).content for url in stored_urls] == raw_images
+    assert [content for content, _ in transport.uploads] == raw_images
+    assert payload["image_urls"] == [
+        f"https://v3.fal.media/input-{index}.png" for index in range(1, 5)
     ]
 
 
@@ -251,12 +331,10 @@ def test_sdk_transport_throttles_queue_result_polling() -> None:
         queue_poll_interval_seconds=1.5,
     )
 
-    result = transport.result(
-        endpoint="tripo3d/tripo/v2.5/image-to-3d", request_id="request-1"
-    )
+    result = transport.result(endpoint="fal-ai/trellis-2/multi", request_id="request-1")
 
     assert result["pbr_model"] == {"url": "https://provider.test/model.glb"}
-    assert client.applications == [("tripo3d/tripo/v2.5/image-to-3d", "request-1")]
+    assert client.applications == [("fal-ai/trellis-2/multi", "request-1")]
     assert client.handle.intervals == [1.5]
 
 

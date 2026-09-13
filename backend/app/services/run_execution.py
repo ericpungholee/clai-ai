@@ -48,12 +48,26 @@ def execute_run_job(
             artifact = ingestor.ingest_masked(result, request)
         else:
             artifact = ingestor.ingest(result)
+        view_jobs = provider.execute_views(
+            front_artifact_url=artifact.artifact_url,
+            request=request,
+        )
+        if tuple(view_jobs) != ("left", "back", "right"):
+            raise RunExecutionError("Image provider returned an invalid set of views")
+        view_urls = {"front": artifact.artifact_url}
+        for angle, view_job in view_jobs.items():
+            view_result = provider.result(view_job)
+            view_urls[angle] = ingestor.ingest(view_result).artifact_url
+        response_metadata = {
+            **result.response_metadata,
+            "views": view_urls,
+        }
         return _commit_version(
             job_id=job_id,
             request=request,
             provider_job=provider_job,
             artifact=artifact,
-            response_metadata=result.response_metadata,
+            response_metadata=response_metadata,
             total_elapsed_seconds=time.monotonic() - run_started,
             session_factory=session_factory,
         )

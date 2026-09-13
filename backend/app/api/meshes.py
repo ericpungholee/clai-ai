@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.graph import get_project_or_404
 from app.core.database import get_db
 from app.models.graph import GraphNode, Version, VersionMesh
-from app.providers.tripo import TRIPO_ENDPOINT
+from app.providers.trellis import TRELLIS_ENDPOINT
 
 router = APIRouter(
     prefix="/api/projects/{project_id}/versions/{version_id}/mesh", tags=["mesh"]
@@ -98,10 +98,12 @@ def create_mesh(
         ):
             return mesh_data(mesh)
     if mesh is None:
-        mesh = VersionMesh(version_id=version_id, provider="fal", model=TRIPO_ENDPOINT)
+        mesh = VersionMesh(
+            version_id=version_id, provider="fal", model=TRELLIS_ENDPOINT
+        )
         db.add(mesh)
     mesh.provider = "fal"
-    mesh.model = TRIPO_ENDPOINT
+    mesh.model = TRELLIS_ENDPOINT
     mesh.attempt_id = data.attempt_id
     mesh.texture = data.texture
     mesh.status = "queued"

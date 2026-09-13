@@ -19,7 +19,6 @@ from app.services.frozen_request_codec import (
 from app.services.operation_routing import OperationRoutingError, resolve_op
 from app.services.prompt_builder import (
     PRESERVATION_PREAMBLE,
-    WHITE_BACKGROUND_CLAUSE,
     build_prompt,
 )
 from app.services.run_freezing import freeze_run_request
@@ -282,21 +281,25 @@ def test_edit_prompt_uses_the_accepted_preamble_exactly() -> None:
 
 
 @pytest.mark.parametrize("op", [Op.GENERATE, Op.GENERATE_REF])
-def test_generate_prompt_appends_white_background_clause(op: Op) -> None:
+def test_generate_prompt_uses_vril_front_studio_framing(op: Op) -> None:
     assert build_prompt(user_prompt="  a navy shoe  ", op=op) == (
-        "a navy shoe\n\nPlace the object on a plain pure white background."
-    )
-    assert (
-        WHITE_BACKGROUND_CLAUSE == "Place the object on a plain pure white background."
+        "Create a professional studio product photograph of a navy shoe, "
+        "shot from a front view at eye level, perfectly centered. "
+        "Photograph the product on a pure white background with professional "
+        "studio lighting that creates soft, subtle shadows. Use sharp focus "
+        "to capture clear, well-defined edges. Center the product in the frame "
+        "and fill the frame while ensuring the entire product is visible - "
+        "nothing should be cropped or cut off. The design should be consistent "
+        "and suitable for viewing from multiple camera angles. Avoid any text "
+        "overlays, watermarks, or distracting elements."
     )
 
 
 @pytest.mark.parametrize("op", [Op.GENERATE, Op.GENERATE_REF])
 def test_generate_prompt_omits_white_background_clause_when_disabled(op: Op) -> None:
-    assert (
-        build_prompt(user_prompt="  a navy shoe  ", op=op, white_background=False)
-        == "a navy shoe"
-    )
+    prompt = build_prompt(user_prompt="  a navy shoe  ", op=op, white_background=False)
+    assert "white background" not in prompt
+    assert "a navy shoe" in prompt and "front view at eye level" in prompt
 
 
 @pytest.mark.parametrize(

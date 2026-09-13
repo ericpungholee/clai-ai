@@ -40,7 +40,7 @@ def validate_glb(content: bytes, *, require_texture: bool = False) -> None:
                     0 <= texture_index < len(textures)
                 ):
                     continue
-                image_index = textures[texture_index].get("source")
+                image_index = _texture_source(textures[texture_index])
                 if isinstance(image_index, int) and 0 <= image_index < len(images):
                     source = images[image_index]
                     if "bufferView" in source or source.get("uri", "").startswith(
@@ -50,6 +50,21 @@ def validate_glb(content: bytes, *, require_texture: bool = False) -> None:
         raise ValueError(
             "The provider returned a mesh without the image's color texture"
         )
+
+
+def _texture_source(texture: object) -> object:
+    if not isinstance(texture, dict):
+        return None
+    if "source" in texture:
+        return texture["source"]
+    extensions = texture.get("extensions")
+    if not isinstance(extensions, dict):
+        return None
+    for name in ("EXT_texture_webp", "KHR_texture_basisu"):
+        extension = extensions.get(name)
+        if isinstance(extension, dict) and "source" in extension:
+            return extension["source"]
+    return None
 
 
 @dataclass(frozen=True)
@@ -67,11 +82,12 @@ def ingest_mesh(
     textured: bool = True,
 ) -> StoredMesh:
     # Prefer the textured artifact when the provider also returns base geometry.
-    mesh = (
-        response.get("pbr_model") or response.get("model_mesh")
+    mesh_keys = (
+        ("model_glb", "pbr_model", "model_mesh")
         if textured
-        else response.get("model_mesh") or response.get("base_model")
+        else ("model_glb", "model_mesh", "base_model")
     )
+    mesh = next((response.get(key) for key in mesh_keys if response.get(key)), None)
     if not isinstance(mesh, dict) or not isinstance(mesh.get("url"), str):
         raise ValueError("The provider returned no mesh")
     content = reader.read(mesh["url"]).content

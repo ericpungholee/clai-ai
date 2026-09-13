@@ -8,6 +8,24 @@ from app.providers.base import (
 )
 from app.providers.fal_transport import FalTransport
 
+VIEW_PROMPTS = {
+    angle: (
+        "Create a studio photograph of the exact same product shown in the "
+        "reference image. Change only the camera angle. Keep the same design, "
+        "proportions, materials, colors, graphics, text, and every design detail "
+        "identical. Maintain the same background, lighting, lens, framing, "
+        f"and camera height. Show the product from {camera}. "
+        "Center exactly one product in the frame with the entire product visible; "
+        "nothing should be cropped or cut off. No extra props, text overlays, "
+        "or watermarks."
+    )
+    for angle, camera in (
+        ("left", "the left side at eye level"),
+        ("back", "directly behind at eye level"),
+        ("right", "the right side at eye level"),
+    )
+}
+
 
 class NanoBananaProProvider:
     id = "fal"
@@ -77,6 +95,30 @@ class NanoBananaProProvider:
             request_id=request_id,
             request_payload=request.request_payload,
         )
+
+    def execute_views(
+        self, *, front_artifact_url: str, request: FrozenRunRequest
+    ) -> dict[str, ProviderJob]:
+        front = self._artifact_reader.read(front_artifact_url)
+        uploaded_front = self._transport.upload(
+            content=front.content, filename=front.filename
+        )
+        jobs: dict[str, ProviderJob] = {}
+        for angle, prompt in VIEW_PROMPTS.items():
+            payload = self._view_payload(
+                request=request,
+                image_url=uploaded_front,
+                prompt=prompt,
+            )
+            jobs[angle] = self.submit(
+                PreparedProviderRequest(
+                    provider=self.id,
+                    model=self.model,
+                    endpoint=self.edit_endpoint,
+                    request_payload=payload,
+                )
+            )
+        return jobs
 
     def result(self, job: ProviderJob) -> ProviderResult:
         if job.provider != self.id or job.endpoint not in {
@@ -162,6 +204,28 @@ class NanoBananaProProvider:
                 self._upload(version) for version in input_versions
             ]
         return payload
+
+    def _view_payload(
+        self, *, request: FrozenRunRequest, image_url: str, prompt: str
+    ) -> dict[str, object]:
+        if request.settings.aspect_ratio not in self._aspect_ratios:
+            raise ProviderContractError("Unsupported Nano Banana Pro aspect ratio")
+        width, height = request.settings.width, request.settings.height
+        if width > 4096 or height > 4096:
+            raise ProviderContractError(
+                "Requested resolution exceeds provider capability"
+            )
+        return {
+            "prompt": prompt,
+            "image_urls": [image_url],
+            "num_images": 1,
+            "seed": request.seed,
+            "aspect_ratio": request.settings.aspect_ratio,
+            "output_format": "png",
+            "resolution": _resolution_label(width=width, height=height),
+            "limit_generations": True,
+            "enable_web_search": False,
+        }
 
     def _upload(self, version: VersionSnapshot) -> str:
         artifact = self._artifact_reader.read(version.artifact_url)

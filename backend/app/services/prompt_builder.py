@@ -20,7 +20,6 @@ EDIT_OPS = frozenset(
 )
 
 GENERATE_OPS = frozenset({Op.GENERATE, Op.GENERATE_REF})
-WHITE_BACKGROUND_CLAUSE = "Place the object on a plain pure white background."
 
 
 class PromptBuildError(ValueError):
@@ -41,6 +40,22 @@ def build_prompt(*, user_prompt: str, op: Op, white_background: bool = True) -> 
         if white_background and op != Op.EDIT_INPAINT:
             return f"{prompt}\n\nThe background must be plain pure white."
         return prompt
-    if op in GENERATE_OPS and white_background:
-        return f"{resolved_prompt}\n\n{WHITE_BACKGROUND_CLAUSE}"
+    if op in GENERATE_OPS:
+        # Vril's studio prompt, with the existing background preference preserved.
+        background = (
+            "Photograph the product on a pure white background with "
+            if white_background
+            else "Use "
+        )
+        return (
+            f"Create a professional studio product photograph of {resolved_prompt}, "
+            "shot from a front view at eye level, perfectly centered. "
+            f"{background}professional studio lighting that creates soft, subtle "
+            "shadows. Use sharp focus to capture clear, well-defined edges. "
+            "Center the product in the frame and fill the frame while ensuring "
+            "the entire product is visible - nothing should be cropped or cut off. "
+            "The design should be consistent and suitable for viewing from "
+            "multiple camera angles. Avoid any text overlays, watermarks, "
+            "or distracting elements."
+        )
     return resolved_prompt

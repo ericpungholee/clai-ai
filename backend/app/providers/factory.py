@@ -31,6 +31,13 @@ class FalImageProvider:
             return self.fill.execute(request)
         return self.nano.execute(request)
 
+    def execute_views(
+        self, *, front_artifact_url: str, request: FrozenRunRequest
+    ) -> dict[str, ProviderJob]:
+        return self.nano.execute_views(
+            front_artifact_url=front_artifact_url, request=request
+        )
+
     def result(self, job: ProviderJob) -> ProviderResult:
         if job.endpoint == self.fill.endpoint:
             return self.fill.result(job)

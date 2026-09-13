@@ -9,7 +9,7 @@ from app.core.database import SessionLocal
 from app.models.graph import RunJob, VersionMesh
 from app.providers.factory import FalImageProvider
 from app.providers.fal_transport import FalSdkTransport
-from app.providers.tripo import TripoProvider
+from app.providers.trellis import TrellisProvider
 from app.services.mesh_jobs import execute_mesh_job
 from app.services.run_execution import execute_run_job
 from app.storage.artifacts import HttpArtifactReader
@@ -70,7 +70,7 @@ def mesh_job(version_id: str, attempt_id: str) -> None:
     try:
         if settings.fal_api_key is None:
             raise ValueError("FAL_KEY is required")
-        provider = TripoProvider(
+        provider = TrellisProvider(
             FalSdkTransport(
                 settings.fal_api_key,
                 timeout_seconds=settings.fal_timeout_seconds,

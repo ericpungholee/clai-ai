@@ -61,9 +61,7 @@ def test_atomic_chips_order_active_following_broken_refs_and_conflicts(
     with TestingSessionLocal() as db:
         frozen = db.get(RunJob, uuid.UUID(submitted.json()["id"])).frozen_request
         assert frozen["input_snapshot"]["connect_version_ids"] == [str(bv), str(av)]
-        assert frozen["prompt_at_runtime"].startswith(
-            "Put the logo from image 1 on image 2"
-        )
+        assert "Put the logo from image 1 on image 2" in frozen["prompt_at_runtime"]
         assert "A lamp" not in frozen["prompt_at_runtime"]
     execute_run_job(
         job_id=uuid.UUID(submitted.json()["id"]),
