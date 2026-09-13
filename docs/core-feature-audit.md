@@ -1,6 +1,6 @@
 # Core feature audit — 2026-09-13
 
-> Historical configuration. Current image/mesh behavior is documented in [the five-view flow](five-view-flow.md).
+> Historical configuration. Current image/mesh behavior is documented in [the image-to-3D flow](image-to-3d-preview.md).
 
 Audited image generation/editing, references and frozen inputs, masks/SAM, image history and branching, mesh submission/cache/ingestion, logo overlays, artifact storage, graph persistence/polling, and worker configuration. This audit builds on the uncommitted provider, multiview and logo work already present in the workspace.
 

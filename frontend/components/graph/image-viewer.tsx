@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { DownloadButton } from "./download-button";
-import { IMAGE_VIEWS, type Version } from "@/lib/graph";
+import type { Version } from "@/lib/graph";
 
 export function ImageViewer({
   versions: initialVersions,
@@ -51,8 +51,7 @@ export function ImageViewer({
 }
 
 function ImagePane({ version, label }: { version: Version; label: string }) {
-  const [angle, setAngle] = useState<(typeof IMAGE_VIEWS)[number][0]>("front");
-  const imageUrl = version.views?.[angle] ?? version.artifact_url;
+  const imageUrl = version.artifact_url;
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number } | null>(null);
   const zoom = (factor: number) =>
@@ -63,9 +62,7 @@ function ImagePane({ version, label }: { version: Version; label: string }) {
   return (
     <section className="flex min-h-0 flex-col gap-2">
       <div className="flex items-center justify-between gap-2 text-xs text-neutral-600">
-        <span>
-          {label}
-        </span>
+        <span>{label}</span>
         <div className="flex items-center gap-3">
           <button aria-label="Zoom out" onClick={() => zoom(1 / 1.25)}>
             −
@@ -74,26 +71,13 @@ function ImagePane({ version, label }: { version: Version; label: string }) {
           <button aria-label="Zoom in" onClick={() => zoom(1.25)}>
             +
           </button>
-          <DownloadButton url={imageUrl} name={`${label}-${version.id}-${angle}`} label="Download original" />
+          <DownloadButton
+            url={imageUrl}
+            name={`${label}-${version.id}`}
+            label="Download original"
+          />
         </div>
       </div>
-      {version.views?.rear_right && (
-        <nav aria-label={`${label} views`} className="flex gap-2 text-xs">
-          {IMAGE_VIEWS.map(([item, title]) => (
-            <button
-              key={item}
-              aria-pressed={angle === item}
-              className={`rounded border px-3 py-1 capitalize ${angle === item ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300"}`}
-              onClick={() => {
-                setAngle(item);
-                setView({ scale: 1, x: 0, y: 0 });
-              }}
-            >
-              {title}
-            </button>
-          ))}
-        </nav>
-      )}
       <div
         className="relative flex min-h-0 flex-1 cursor-grab items-center justify-center overflow-hidden rounded-lg bg-white touch-none active:cursor-grabbing"
         onWheel={(event) => {

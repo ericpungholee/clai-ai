@@ -107,18 +107,7 @@ def test_mask_save_stale_block_and_frozen_composited_commit(
             transport=httpx.MockTransport(
                 lambda request: httpx.Response(
                     200,
-                    content=png(
-                        (10, 40),
-                        "red"
-                        if "front_left" in str(request.url)
-                        else "blue"
-                        if "front_right" in str(request.url)
-                        else "green"
-                        if "rear_left" in str(request.url)
-                        else "yellow"
-                        if "rear_right" in str(request.url)
-                        else "black",
-                    ),
+                    content=png((10, 40), "black"),
                     headers={"content-type": "image/png"},
                 )
             )

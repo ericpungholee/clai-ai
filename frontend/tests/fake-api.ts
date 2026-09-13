@@ -40,10 +40,6 @@ function previewForGraph(graph: GraphDocument, nodeId: string) {
   return { op };
 }
 
-function imageViews(front: string) {
-  return { front, front_right: `${front}?view=front_right`, rear_right: `${front}?view=rear_right`, rear_left: `${front}?view=rear_left`, front_left: `${front}?view=front_left` };
-}
-
 function fixture(): GraphDocument {
   const settings = {
     aspect_ratio: "1:1",
@@ -56,7 +52,6 @@ function fixture(): GraphDocument {
     node_id: "source",
     created_at: project.created_at,
     artifact_url: "http://127.0.0.1:8109/artifacts/subject.svg",
-    views: imageViews("http://127.0.0.1:8109/artifacts/subject.svg"),
     op: "generate" as const,
     provider: "fake",
     model: "fake",
@@ -239,7 +234,6 @@ createServer(async (request, response) => {
         ...fixture().nodes[0].versions[0],
         id: `result-${entry.job.id}`,
         artifact_url: `http://127.0.0.1:8109/artifacts/result-${entry.job.id}.svg`,
-        views: imageViews(`http://127.0.0.1:8109/artifacts/result-${entry.job.id}.svg`),
         node_id: node.id,
         prompt_at_runtime: entry.prompt,
         seed: entry.seed,

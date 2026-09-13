@@ -98,7 +98,7 @@ def test_worker_leaves_raw_glb_and_manual_logo_can_be_saved(
     cached = client.get(prefix).json()
     assert cached["status"] == "complete"
     assert cached["logo_preservation"] is None
-    assert len(source_reader.urls) == 5  # No extra source read for automatic decals.
+    assert source_reader.urls == [source_url]
     expected_crop, bounds, subject = extract_logo(BEAR.read_bytes())
     png = BytesIO()
     expected_crop.save(png, "PNG")

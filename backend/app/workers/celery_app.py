@@ -12,7 +12,6 @@ from app.providers.fal_transport import FalSdkTransport
 from app.providers.hunyuan import HUNYUAN_ENDPOINT, HunyuanProvider
 from app.providers.trellis import (
     TRELLIS_ENDPOINT,
-    TRELLIS_MULTI_ENDPOINT,
     TrellisProvider,
 )
 from app.services.mesh_jobs import execute_mesh_job
@@ -82,12 +81,12 @@ def mesh_job(version_id: str, attempt_id: str) -> None:
             if mesh is None or mesh.attempt_id != uuid.UUID(attempt_id):
                 return
             model = mesh.model
-        provider_type = {
-            HUNYUAN_ENDPOINT: HunyuanProvider,
-            TRELLIS_ENDPOINT: TrellisProvider,
-            TRELLIS_MULTI_ENDPOINT: TrellisProvider,
-        }.get(model)
-        if provider_type is None:
+        # Previously queued TRELLIS variants use the current single-image contract.
+        if model == TRELLIS_ENDPOINT or model.startswith(TRELLIS_ENDPOINT + "/"):
+            provider_type = TrellisProvider
+        elif model == HUNYUAN_ENDPOINT:
+            provider_type = HunyuanProvider
+        else:
             raise ValueError("Unsupported frozen mesh model")
         provider = provider_type(
             FalSdkTransport(

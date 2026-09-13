@@ -8,13 +8,12 @@ import pytest
 from PIL import Image
 
 from app.api.meshes import get_mesh_enqueuer
-from app.domain.image_views import SUPPORTING_VIEWS
 from app.domain.runs import NodeSettings, Op
 from app.main import app
 from app.models.graph import RunJob, Version, VersionMesh
-from app.providers.base import ArtifactBytes, ProviderContractError
+from app.providers.base import ArtifactBytes
 from app.providers.hunyuan import HUNYUAN_ENDPOINT, HunyuanProvider
-from app.providers.trellis import TRELLIS_MULTI_ENDPOINT, TrellisProvider
+from app.providers.trellis import TRELLIS_ENDPOINT, TrellisProvider
 from app.services.frozen_request_codec import (
     decode_frozen_request,
     encode_frozen_request,
@@ -35,55 +34,32 @@ from tests.test_graph import (
     submit_and_execute,
 )
 from tests.test_meshes import Queue, Reader, Transport, glb, textured_document
-from tests.test_provider_storage import provider_for, request, version
+from tests.test_provider_storage import provider_for, request
 
 
 def test_image_choices_are_frozen_and_legacy_jobs_keep_their_original_policy():
     frozen = request(Op.GENERATE)
     assert decode_frozen_request(encode_frozen_request(frozen)) == frozen
     assert frozen.settings == NodeSettings()
-    assert frozen.settings.generate_views
     provider, _, _ = provider_for()
     precise = replace(
         frozen,
         settings=NodeSettings(
             image_model="sunburst",
             image_quality="max",
-            generate_views=True,
         ),
     )
     job = provider.execute(decode_frozen_request(encode_frozen_request(precise)))
     assert job.endpoint == "openai/gpt-image-2.5/sunburst/text-to-image"
     assert job.request_payload["quality"] == "max"
     legacy = encode_frozen_request(frozen)
-    for key in ("image_model", "image_quality", "generate_views"):
+    for key in ("image_model", "image_quality"):
         del legacy["settings"][key]
     settings = decode_frozen_request(legacy).settings
-    assert (settings.image_model, settings.image_quality, settings.generate_views) == (
+    assert (settings.image_model, settings.image_quality) == (
         "sunburst",
         "max",
-        True,
     )
-
-
-def test_each_view_submission_is_recorded_before_the_next_can_fail():
-    provider, transport, _ = provider_for((version("front"), version("back")))
-    recorded = []
-
-    def submit(*, endpoint, payload):
-        if recorded:
-            raise RuntimeError("Second submission failed")
-        return "paid-first-side"
-
-    transport.submit = submit
-    with pytest.raises(RuntimeError, match="Second submission"):
-        provider.execute_views(
-            reference_urls={"front": "clai://front"},
-            angles=SUPPORTING_VIEWS,
-            request=request(Op.GENERATE),
-            on_submitted=lambda angle, job: recorded.append((angle, job.request_id)),
-        )
-    assert recorded == [("front_right", "paid-first-side")]
 
 
 def test_corrupt_frozen_job_fails_without_staying_queued_or_calling_fal(client):
@@ -110,9 +86,9 @@ def test_corrupt_frozen_job_fails_without_staying_queued_or_calling_fal(client):
     assert provider.requests == []
 
 
-def test_generated_views_enter_mesh_and_regeneration_is_idempotent(client, tmp_path):
+def test_canonical_image_enters_mesh_and_regeneration_is_idempotent(client, tmp_path):
     project = create_project(client)
-    node = create_node(client, project, prompt="Bare deck", generate_views=True)
+    node = create_node(client, project, prompt="Bare deck")
     queue = CapturingEnqueuer()
     app.dependency_overrides[get_run_enqueuer] = lambda: queue
     _, version_id = submit_and_execute(
@@ -134,15 +110,15 @@ def test_generated_views_enter_mesh_and_regeneration_is_idempotent(client, tmp_p
     )
     with TestingSessionLocal() as db:
         source = db.get(Version, version_id)
-        assert len(source.provider_response_metadata["views"]) == 5
-        assert set(reader.urls) == set(
-            source.provider_response_metadata["views"].values()
-        )
+        assert reader.urls == [source.artifact_url]
         assert (
             db.get(VersionMesh, version_id).provider_response_metadata["input_policy"]
-            == "stored_five_views"
+            == "canonical_image"
         )
-    assert len(transport.submissions[0]["image_urls"]) == 5
+    assert (
+        transport.submissions[0]["image_url"] == "https://uploaded.fal.test/image-1.png"
+    )
+    assert "image_urls" not in transport.submissions[0]
     next_attempt = str(uuid.uuid4())
     data = {"attempt_id": next_attempt, "regenerate": True}
     assert client.post(path, json=data).json()["status"] == "queued"
@@ -200,16 +176,14 @@ def test_hunyuan_uses_original_image_and_honors_geometry_only(textured):
 
     transport = Transport()
     provider = HunyuanProvider(transport, Source())
-    assert provider.endpoint_for(["source"]) == HUNYUAN_ENDPOINT
-    payload = provider.prepare(source_urls=["source"], textured=textured)
+    assert provider.endpoint == HUNYUAN_ENDPOINT
+    payload = provider.prepare(source_url="source", textured=textured)
     assert payload == {
         "input_image_url": "https://uploaded.fal.test/image-1.png",
         "enable_geometry": not textured,
         "enable_pbr": False,
     }
     assert transport.uploads == [png.getvalue()]
-    with pytest.raises(ProviderContractError, match="one source"):
-        provider.prepare(source_urls=["front", "back"])
 
 
 def test_hunyuan_explicit_glb_wins_over_mislabelled_obj_and_keeps_thumbnail(tmp_path):
@@ -247,8 +221,8 @@ def test_mesh_model_selection_is_frozen_at_enqueue(client):
     )
     assert rejected.status_code == 422
     first = client.post(path, json={"attempt_id": str(uuid.uuid4())})
-    assert first.json()["model"] == TRELLIS_MULTI_ENDPOINT
-    assert len(first.json()["source_views"]) == 5
+    assert first.json()["model"] == TRELLIS_ENDPOINT
+    assert "source_views" not in first.json()
     second = client.post(path, json={"attempt_id": str(uuid.uuid4())})
     assert second.json()["attempt_id"] == first.json()["attempt_id"]
     assert len(mesh_queue.calls) == 1

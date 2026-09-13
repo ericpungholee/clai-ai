@@ -5,8 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.domain.image_views import mesh_view_urls
-from app.models.graph import Version, VersionMesh
+from app.models.graph import VersionMesh
 from app.providers.base import ArtifactReader, MeshProvider
 from app.storage.artifacts import ArtifactStore
 from app.storage.meshes import ingest_mesh
@@ -31,27 +30,17 @@ def execute_mesh_job(
             return
         mesh.status = "dispatching"
         mesh.started_at = datetime.now(UTC)
-        version = db.get(Version, version_id)
-        front_url = mesh.source_artifact_url
-        response_metadata = (
-            version.provider_response_metadata if version is not None else None
-        )
+        source_url = mesh.source_artifact_url
         texture = mesh.texture
     start = time.monotonic()
     try:
-        source_views = mesh_view_urls(front_url=front_url, metadata=response_metadata)
-        if not provider.supports_multiview:
-            raise ValueError("This flow requires a multi-image reconstruction provider")
-        # Persist the exact local inputs before uploading or submitting to TRELLIS.
-        with session_factory.begin() as db:
-            db.get(VersionMesh, version_id).provider_response_metadata = {
-                "source_views": source_views,
-                "input_policy": "stored_five_views",
-            }
-        source_urls = tuple(source_views.values())
-        endpoint = provider.endpoint_for(source_urls)
+        input_metadata = {
+            "input_policy": "canonical_image",
+            "source_artifact_url": source_url,
+        }
+        endpoint = provider.endpoint
         payload = provider.prepare(
-            source_urls=source_urls, textured=texture == "standard"
+            source_url=source_url, textured=texture == "standard"
         )
         with session_factory.begin() as db:
             mesh = db.get(VersionMesh, version_id)
@@ -80,8 +69,7 @@ def execute_mesh_job(
             mesh.preview_url = stored.preview.artifact_url if stored.preview else None
             mesh.provider_response_metadata = {
                 "timings": response.get("timings"),
-                "source_views": source_views,
-                "input_policy": "stored_five_views",
+                **input_metadata,
                 "provider_elapsed_seconds": provider_elapsed,
                 "preparation_elapsed_seconds": provider_start - start,
                 "artifact_sha256": stored.model.sha256,

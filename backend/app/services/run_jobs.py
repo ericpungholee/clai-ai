@@ -246,7 +246,6 @@ def _node_snapshot(node: GraphNode) -> NodeSnapshot:
             # Already queued jobs retain the settings in their frozen request.
             image_model="sunburst",
             image_quality="max",
-            generate_views=True,
         ),
         seed=node.seed,
         mask=mask,

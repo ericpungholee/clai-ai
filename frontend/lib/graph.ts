@@ -16,7 +16,6 @@ export type NodeSettings = {
   whiteBackground: boolean;
   image_model?: "flare" | "sunburst";
   image_quality?: "high" | "max";
-  generate_views?: boolean;
 };
 
 export type Version = {
@@ -24,7 +23,6 @@ export type Version = {
   node_id: string;
   created_at: string;
   artifact_url: string;
-  views?: Partial<Record<"front" | "front_right" | "rear_right" | "rear_left" | "front_left", string>>;
   op: Op;
   provider: string;
   model: string;
@@ -567,11 +565,3 @@ export function nodeLabel(node: { title: string; prompt: string }): string {
     "Image"
   );
 }
-
-export const IMAGE_VIEWS = [
-  ["front", "Hero / front"],
-  ["front_right", "Front-right 45°"],
-  ["rear_right", "Rear-right 135°"],
-  ["rear_left", "Rear-left 225°"],
-  ["front_left", "Front-left 315°"],
-] as const;

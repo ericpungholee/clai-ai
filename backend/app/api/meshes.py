@@ -6,16 +6,15 @@ from typing import Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException
 from PIL import Image, UnidentifiedImageError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.graph import get_project_or_404
 from app.core.config import settings
 from app.core.database import get_db
-from app.domain.image_views import mesh_view_urls
 from app.models.graph import GraphNode, Version, VersionMesh
-from app.providers.trellis import TRELLIS_MULTI_ENDPOINT
+from app.providers.trellis import TRELLIS_ENDPOINT
 from app.schemas.mesh_logo import LogoPreservation, MeshDecal
 from app.storage.artifacts import ArtifactStore
 from app.storage.factory import create_artifact_store
@@ -45,7 +44,6 @@ class MeshData(BaseModel):
     elapsed_seconds: float | None
     model: str
     logo_preservation: LogoPreservation | None = None
-    source_views: dict[str, str] = Field(default_factory=dict)
 
 
 class LogoUpdate(BaseModel):
@@ -74,7 +72,6 @@ def get_mesh_enqueuer() -> MeshEnqueuer:
 
 def mesh_data(mesh: VersionMesh) -> MeshData:
     data = MeshData.model_validate(mesh, from_attributes=True)
-    data.source_views = mesh.provider_response_metadata.get("source_views", {})
     logo = mesh.provider_response_metadata.get("logo_preservation")
     if logo is not None:
         data.logo_preservation = LogoPreservation.model_validate(logo)
@@ -126,20 +123,13 @@ def create_mesh(
             mesh.status != "failed" and not upgrade_texture and not regenerate
         ):
             return mesh_data(mesh)
-    version = db.get(Version, version_id)
-    try:
-        views = mesh_view_urls(
-            front_url=source_url, metadata=version.provider_response_metadata
-        )
-    except ValueError as error:
-        raise HTTPException(409, str(error)) from error
     if mesh is None:
         mesh = VersionMesh(
-            version_id=version_id, provider="fal", model=TRELLIS_MULTI_ENDPOINT
+            version_id=version_id, provider="fal", model=TRELLIS_ENDPOINT
         )
         db.add(mesh)
     mesh.provider = "fal"
-    mesh.model = TRELLIS_MULTI_ENDPOINT
+    mesh.model = TRELLIS_ENDPOINT
     mesh.attempt_id = data.attempt_id
     mesh.texture = data.texture
     mesh.status = "queued"
@@ -150,10 +140,7 @@ def create_mesh(
     mesh.elapsed_seconds = None
     mesh.started_at = None
     mesh.provider_request_id = None
-    mesh.provider_response_metadata = {
-        "source_views": views,
-        "input_policy": "stored_five_views",
-    }
+    mesh.provider_response_metadata = {"input_policy": "canonical_image"}
     mesh.request_payload = {}
     db.commit()
     try:

@@ -1,6 +1,5 @@
 """Hunyuan 3D v3.1 Rapid's single-image reconstruction contract."""
 
-from collections.abc import Sequence
 from io import BytesIO
 
 from PIL import Image
@@ -12,23 +11,14 @@ HUNYUAN_ENDPOINT = "fal-ai/hunyuan-3d/v3.1/rapid/image-to-3d"
 
 
 class HunyuanProvider:
-    supports_multiview = False
+    endpoint = HUNYUAN_ENDPOINT
 
     def __init__(self, transport: FalTransport, artifact_reader: ArtifactReader):
         self.transport = transport
         self.artifact_reader = artifact_reader
 
-    @staticmethod
-    def endpoint_for(source_urls: Sequence[str]) -> str:
-        if len(source_urls) != 1:
-            raise ProviderContractError("Hunyuan Rapid requires one source image")
-        return HUNYUAN_ENDPOINT
-
-    def prepare(
-        self, *, source_urls: Sequence[str], textured: bool = True
-    ) -> dict[str, object]:
-        self.endpoint_for(source_urls)
-        source = self.artifact_reader.read(source_urls[0])
+    def prepare(self, *, source_url: str, textured: bool = True) -> dict[str, object]:
+        source = self.artifact_reader.read(source_url)
         if len(source.content) > 8 * 1024 * 1024:
             raise ProviderContractError("Hunyuan input exceeds its 8 MB limit")
         with Image.open(BytesIO(source.content)) as image:

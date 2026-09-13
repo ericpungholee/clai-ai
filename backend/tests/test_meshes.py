@@ -14,7 +14,7 @@ from app.api.meshes import get_mesh_enqueuer
 from app.main import app
 from app.models.graph import Version, VersionMesh
 from app.providers.base import ArtifactBytes
-from app.providers.trellis import TRELLIS_MULTI_ENDPOINT, TrellisProvider
+from app.providers.trellis import TRELLIS_ENDPOINT, TrellisProvider
 from app.services.mesh_jobs import execute_mesh_job
 from app.services.run_queue import get_run_enqueuer
 from app.storage.artifacts import FileArtifactStore
@@ -86,7 +86,7 @@ class Transport:
             return f"https://uploaded.fal.test/image-{len(self.uploads)}.png"
 
     def submit(self, *, endpoint: str, payload: dict[str, object]) -> str:
-        assert endpoint == TRELLIS_MULTI_ENDPOINT == "fal-ai/trellis-2/multi"
+        assert endpoint == TRELLIS_ENDPOINT == "fal-ai/trellis-2"
         self.submissions.append(payload)
         return "fake-mesh-request"
 
@@ -153,30 +153,29 @@ def test_mesh_is_a_version_cache_with_uploaded_input_and_ingested_assets(
     execute_mesh_job(**arguments)
     assert len(transport.submissions) == 1
     payload = transport.submissions[0]
-    assert len(payload["image_urls"]) == 5
-    assert {key: value for key, value in payload.items() if key != "image_urls"} == {
+    assert payload["image_url"] == "https://uploaded.fal.test/image-1.png"
+    assert "image_urls" not in payload
+    assert {key: value for key, value in payload.items() if key != "image_url"} == {
         "seed": 1337,
-        "resolution": 1536,
-        "texture_size": 4096,
-        "decimation_target": 500000,
+        "resolution": 1024,
+        "texture_size": 2048,
+        "decimation_target": 50000,
         "ss_sampling_steps": 12,
         "ss_guidance_strength": 8.0,
         "shape_slat_sampling_steps": 12,
         "shape_slat_guidance_strength": 8.0,
         "tex_slat_sampling_steps": 12,
         "tex_slat_guidance_strength": 1.0,
-        "remesh": True,
-        "remesh_band": 1.0,
-        "remesh_project": 1.0,
+        "remesh": False,
+        "remesh_project": 0.0,
     }
     with TestingSessionLocal() as db:
         source_url = db.get(Version, first).artifact_url
         mesh = db.get(VersionMesh, first)
         assert mesh.source_artifact_url == source_url
-        views = db.get(Version, first).provider_response_metadata["views"]
-        assert mesh.provider_response_metadata["source_views"] == views
-    assert set(source_reader.urls) == set(views.values())
-    assert len(transport.uploads) == 5
+        assert mesh.provider_response_metadata["input_policy"] == "canonical_image"
+    assert source_reader.urls == [source_url]
+    assert len(transport.uploads) == 1
     assert output_reader.urls[0] == "https://provider.test/textured.glb"
     cached = client.get(f"{prefix}/{first}/mesh").json()
     assert cached["status"] == "complete"
@@ -206,9 +205,9 @@ def test_mesh_is_a_version_cache_with_uploaded_input_and_ingested_assets(
         == cached
     )
     prepared_again = TrellisProvider(transport, Reader()).prepare(
-        source_urls=[f"https://clai.test/image-{index}.png" for index in range(5)]
+        source_url="https://clai.test/image.png"
     )
-    assert len(prepared_again["image_urls"]) == 5
+    assert "image_url" in prepared_again and "image_urls" not in prepared_again
 
 
 def test_grey_cache_can_be_upgraded_once_from_its_original_image(
@@ -256,7 +255,7 @@ def test_grey_cache_can_be_upgraded_once_from_its_original_image(
     colored = client.get(prefix).json()
     assert colored["status"] == "complete" and colored["texture"] == "standard"
     assert colored["artifact_url"] != grey["artifact_url"]
-    assert len(reader.urls) == 10 and set(reader.urls[:5]) == set(reader.urls[5:])
+    assert len(reader.urls) == 2 and len(set(reader.urls)) == 1
     assert client.post(prefix, json={"attempt_id": str(uuid.uuid4())}).json() == colored
     assert len(queue.calls) == 2
 
@@ -322,7 +321,7 @@ def test_trellis_webp_texture_extension_is_accepted() -> None:
     validate_glb(glb(document), require_texture=True)
 
 
-def test_historical_image_without_views_cannot_silently_use_single_image(
+def test_historical_image_can_request_single_image_reconstruction(
     client: TestClient, tmp_path: Path
 ) -> None:
     project = create_project(client)
@@ -338,9 +337,9 @@ def test_historical_image_without_views_cannot_silently_use_single_image(
     prefix = f"/api/projects/{project}/versions/{version}/mesh"
     attempt = uuid.uuid4()
     response = client.post(prefix, json={"attempt_id": str(attempt)})
-    assert response.status_code == 409
-    assert "five coherent views" in response.json()["detail"]
-    assert client.get(prefix).json() is None
+    assert response.status_code == 202
+    assert "source_views" not in response.json()
+    assert client.get(prefix).json()["status"] == "queued"
 
 
 def test_mesh_failure_cannot_invalidate_its_image(
@@ -391,7 +390,7 @@ def test_mesh_failure_cannot_invalidate_its_image(
     )
     assert len(queue.calls) == 2
     with TestingSessionLocal() as db:
-        assert db.get(VersionMesh, version).model == TRELLIS_MULTI_ENDPOINT
+        assert db.get(VersionMesh, version).model == TRELLIS_ENDPOINT
 
 
 def test_glb_must_not_reference_expiring_external_assets() -> None:

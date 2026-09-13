@@ -8,7 +8,6 @@ export type LogoPreservation = {
 
 type MeshIdentity = {
   model?: string;
-  source_views?: Record<string, string>;
   version_id: string;
   attempt_id: string;
   texture: "no" | "standard";

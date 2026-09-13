@@ -3,24 +3,6 @@ import { api, card, draft, graph } from "./lifecycle-helpers";
 
 test.beforeEach(async ({ request }) => { await request.post(`${api}/reset`); });
 
-test("generation options persist before Run and stay locked while generating", async ({ page, request }) => {
-  await page.goto("/projects/fixture-project");
-  const target = card(page, "target");
-  await target.getByText("Generation options", { exact: true }).click();
-  await expect(target.getByRole("combobox", { name: "Image detail" })).toHaveValue("flare");
-  await expect(target.getByRole("checkbox", { name: "Generate four views · takes longer" })).not.toBeChecked();
-  await target.getByRole("combobox", { name: "Image detail" }).selectOption("sunburst");
-  await target.getByRole("checkbox", { name: "Generate four views · takes longer" }).check();
-  await target.getByRole("button", { name: "Run", exact: true }).click();
-  await expect.poll(async () => (await graph(request)).nodes[1].run?.status).toBe("queued");
-  const settings = (await graph(request)).nodes[1].settings;
-  expect(settings.image_model).toBe("sunburst");
-  expect(settings.image_quality).toBe("max");
-  expect(settings.generate_views).toBe(true);
-  await expect(target.getByRole("combobox", { name: "Image detail" })).toBeDisabled();
-  await expect(target.getByRole("checkbox", { name: "Generate four views · takes longer" })).toBeDisabled();
-});
-
 test("white image and prompt surfaces, blank names, and useful input numbers", async ({ page, request }) => {
   await page.goto("/projects/fixture-project");
   for (const selector of [".image-preview", ".prompt-anchor", ".prompt-editor"]) {

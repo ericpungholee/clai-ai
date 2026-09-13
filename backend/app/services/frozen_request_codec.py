@@ -24,7 +24,6 @@ def encode_frozen_request(request: FrozenRunRequest) -> dict[str, object]:
             "whiteBackground": request.settings.white_background,
             "image_model": request.settings.image_model,
             "image_quality": request.settings.image_quality,
-            "generate_views": request.settings.generate_views,
         },
         "subject": _encode_version(request.subject) if request.subject else None,
         "connects": [_encode_version(version) for version in request.connects],
@@ -71,7 +70,6 @@ def decode_frozen_request(payload: Mapping[str, object]) -> FrozenRunRequest:
             white_background=_boolean(settings, "whiteBackground", default=True),
             image_model=settings.get("image_model", "sunburst"),
             image_quality=settings.get("image_quality", "max"),
-            generate_views=_boolean(settings, "generate_views", default=True),
         ),
         subject=(
             _decode_version(_as_mapping(subject_value, "subject"))

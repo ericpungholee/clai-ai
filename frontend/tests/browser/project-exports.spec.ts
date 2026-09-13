@@ -30,9 +30,9 @@ test("canvas exports the original image and the saved GLB", async ({ page }) => 
   await source.getByRole("button", { name: "Export image", exact: true }).click();
   expect((await imageDownload).suggestedFilename()).toMatch(/\.svg$/);
   await source.getByRole("button", { name: "3D", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Export mesh only · GLB" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Export GLB" })).toHaveCount(0);
   await page.getByRole("button", { name: "Generate 3D" }).click();
-  const exportModel = page.getByRole("button", { name: "Export mesh only · GLB" });
+  const exportModel = page.getByRole("button", { name: "Export GLB" });
   await expect(exportModel).toBeVisible();
   const meshDownload = page.waitForEvent("download");
   await exportModel.click();

@@ -72,7 +72,6 @@ class NodeSettings:
     white_background: bool = True
     image_model: Literal["flare", "sunburst"] = "sunburst"
     image_quality: Literal["high", "max"] = "max"
-    generate_views: bool = True
 
     def __post_init__(self) -> None:
         if not self.aspect_ratio.strip():

@@ -8,7 +8,6 @@ import pytest
 from fal_client import Completed, FalClientHTTPError, Queued
 from PIL import Image
 
-from app.domain.image_views import SUPPORTING_VIEWS, VIEW_ORDER
 from app.domain.runs import (
     FrozenRunRequest,
     InputSnapshot,
@@ -28,7 +27,6 @@ from app.providers.base import (
 )
 from app.providers.fal_transport import FalAccountError, FalSdkTransport
 from app.providers.gpt_image import (
-    VIEW_PROMPTS,
     GptImageProvider,
 )
 from app.providers.trellis import TrellisProvider
@@ -223,66 +221,27 @@ def test_generate_uses_text_endpoint_without_uploads() -> None:
     ]
 
 
-def test_all_supporting_views_reference_only_the_hero_without_category_prompt():
-    provider, transport, reader = provider_for((version("front"),))
-    front = version("front").artifact_url
-    jobs = provider.execute_views(
-        reference_urls={"front": front},
-        angles=SUPPORTING_VIEWS,
-        request=request(Op.GENERATE),
-    )
-    assert tuple(jobs) == SUPPORTING_VIEWS
-    assert reader.read_urls == [front]
-    assert len(transport.uploads) == 1
-    for angle, (endpoint, payload) in zip(
-        SUPPORTING_VIEWS, transport.submissions, strict=True
-    ):
-        assert endpoint == GptImageProvider.edit_endpoint
-        assert payload["prompt"] == VIEW_PROMPTS[angle]
-        assert "runtime prompt" not in payload["prompt"]
-        assert payload["quality"] == "max"
-        assert payload["num_images"] == 1
-        assert payload["image_urls"] == ["https://v3.fal.media/input-1.png"]
-
-
-def test_five_raw_outputs_are_stored_and_uploaded_to_trellis_unchanged(tmp_path):
-    raw_images = []
-    for color in ("red", "green", "blue", "yellow", "purple"):
-        output = BytesIO()
-        Image.new("RGB", (8, 8), color).save(output, "PNG")
-        raw_images.append(output.getvalue())
+def test_raw_main_image_is_stored_and_uploaded_to_trellis_unchanged(tmp_path):
+    output = BytesIO()
+    Image.new("RGB", (8, 8), "red").save(output, "PNG")
+    raw_image = output.getvalue()
+    url = "https://fal.test/main.png"
     output_reader = FakeArtifactReader(
-        {
-            f"https://fal.test/{angle}.png": ArtifactBytes(
-                data, "image/png", f"{angle}.png"
-            )
-            for angle, data in zip(VIEW_ORDER, raw_images, strict=True)
-        }
+        {url: ArtifactBytes(raw_image, "image/png", "main.png")}
     )
     store = FileArtifactStore(root=tmp_path, public_base_url="https://clai.test")
-    ingestor = ArtifactIngestor(reader=output_reader, store=store)
-    stored_urls = []
-    for angle, url in zip(VIEW_ORDER, output_reader.artifacts, strict=True):
-        job = ProviderJob(
-            "fal",
-            "gpt-image-2.5-sunburst",
-            "openai/gpt-image-2.5/sunburst/edit",
-            angle,
-            {},
-        )
-        result = ProviderResult(job, url, "image/png", 8, 8, {})
-        stored_urls.append(ingestor.ingest(result).artifact_url)
-
+    job = ProviderJob(
+        "fal", "gpt-image-2.5-sunburst", GptImageProvider.generate_endpoint, "main", {}
+    )
+    result = ProviderResult(job, url, "image/png", 8, 8, {})
+    stored = ArtifactIngestor(reader=output_reader, store=store).ingest(result)
     transport = FakeFalTransport()
     reader = FileArtifactReader(root=tmp_path, public_base_url="https://clai.test")
-    payload = TrellisProvider(transport, reader).prepare(source_urls=stored_urls)
-
-    assert [reader.read(url).content for url in stored_urls] == raw_images
-    uploaded = {
-        f"https://v3.fal.media/input-{index}.png": content
-        for index, (content, _) in enumerate(transport.uploads, 1)
-    }
-    assert [uploaded[url] for url in payload["image_urls"]] == raw_images
+    payload = TrellisProvider(transport, reader).prepare(source_url=stored.artifact_url)
+    assert reader.read(stored.artifact_url).content == raw_image
+    assert transport.uploads == [(raw_image, "output.png")]
+    assert payload["image_url"] == "https://v3.fal.media/input-1.png"
+    assert "image_urls" not in payload
 
 
 def test_sdk_transport_submits_paid_request_exactly_once() -> None:
@@ -331,10 +290,10 @@ def test_sdk_transport_throttles_queue_result_polling(monkeypatch) -> None:
         ),
     )
 
-    result = transport.result(endpoint="fal-ai/trellis-2/multi", request_id="request-1")
+    result = transport.result(endpoint="fal-ai/trellis-2", request_id="request-1")
 
     assert result["pbr_model"] == {"url": "https://provider.test/model.glb"}
-    assert client.applications == [("fal-ai/trellis-2/multi", "request-1")]
+    assert client.applications == [("fal-ai/trellis-2", "request-1")]
     assert sleeps == [1.5]
     assert client.handle.calls == 2
 
@@ -381,7 +340,7 @@ def test_sdk_transport_bounds_a_stalled_provider_without_resubmission(monkeypatc
         ),
     )
     with pytest.raises(TimeoutError, match="request-1 is recorded"):
-        transport.result(endpoint="fal-ai/trellis-2/multi", request_id="request-1")
+        transport.result(endpoint="fal-ai/trellis-2", request_id="request-1")
     assert http_calls == []
 
 

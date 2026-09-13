@@ -14,7 +14,7 @@ Clai is a visual workspace for developing physical product concepts with generat
 - Preserves pixels outside masked edits with deterministic compositing.
 - Branches from any saved image without changing the original result.
 - Stores provider outputs locally or in S3-compatible object storage.
-- Generates textured 3D meshes from five saved views of one object, each supporting view referenced directly to its hero.
+- Generates textured 3D previews directly from one saved main image.
 - Persists durable run state through PostgreSQL, Redis, and Celery.
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black) ![FastAPI](https://img.shields.io/badge/FastAPI-Python_3.12-009688) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1)
@@ -58,7 +58,7 @@ flowchart LR
 
 Submitting a run resolves its exact subject, references, mask, prompt, settings, and seed into a frozen database record. The worker executes that snapshot even if another browser tab changes the draft later. A successful run creates one immutable version; continuing an edit creates a new node linked to that version.
 
-New drafts use GPT Image 2.5 Sunburst at maximum quality and 1024×1024. Each image version contains the hero plus four overlapping camera views generated directly from that hero. Open **Inspect result** or **3D → Images used for 3D** to inspect all five originals. 3D sends those exact five images to TRELLIS.2 multi-image at 1536 geometry / 4096 texture resolution. Older images need a newly generated five-view version before reconstruction. **Regenerate 3D** replaces a cached result on request. See [the five-view audit](docs/five-view-flow.md) for endpoint verification and quality limits.
+New drafts use GPT Image 2.5 Sunburst at maximum quality and 1024×1024. Each run generates and stores one main image, which is usable as soon as generation and ingestion finish. No additional camera images are generated. **3D** sends that exact saved image to `fal-ai/trellis-2`, using 1024 geometry / 2048 texture, 50,000 target vertices and no remesh. The viewer displays provider geometry and textures directly. **Export GLB** downloads that same stored mesh. **Regenerate 3D** reuses the original main image. See [the image-to-3D flow](docs/image-to-3d-preview.md).
 
 Provider files are validated and copied into Clai-owned storage before the result is committed. The default filesystem backend works without cloud infrastructure. S3-compatible storage is available through the variables documented in [.env.example](.env.example).
 

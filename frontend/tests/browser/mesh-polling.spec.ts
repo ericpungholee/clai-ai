@@ -11,9 +11,6 @@ async function openMesh(page: Page) {
 }
 async function ready(page: Page) {
   await expect(page.getByRole("button", { name: "Reset view" })).toBeEnabled();
-  await expect(
-    page.getByRole("button", { name: "Select logo in source image" }),
-  ).toBeEnabled();
 }
 test("mesh polling runs every two seconds, stops on close, and reopens the same worker job", async ({
   page,

@@ -5,7 +5,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.domain.image_views import SUPPORTING_VIEWS, VIEW_ORDER
 from app.domain.runs import FrozenRunRequest
 from app.main import app
 from app.models.graph import GraphEdge, GraphNode, RunJob, Version
@@ -29,7 +28,6 @@ class FakeProvider:
 
     def __init__(self) -> None:
         self.requests: list[FrozenRunRequest] = []
-        self.view_requests: list[tuple[str, str]] = []
 
     def execute(self, request: FrozenRunRequest) -> ProviderJob:
         self.requests.append(request)
@@ -54,34 +52,10 @@ class FakeProvider:
             response_metadata={"fixture": True},
         )
 
-    def execute_views(
-        self,
-        *,
-        reference_urls: dict[str, str],
-        angles: tuple[str, ...],
-        request: FrozenRunRequest,
-        on_submitted=None,
-    ) -> dict[str, ProviderJob]:
-        jobs = {}
-        for angle in angles:
-            self.view_requests.append((angle, reference_urls["front"]))
-            jobs[angle] = ProviderJob(
-                provider="fake",
-                model="fixture-image-v1",
-                endpoint=f"fake/view-{angle}",
-                request_id=f"fake-view-{angle}-{len(self.requests)}",
-                request_payload={"image_urls": list(reference_urls.values())},
-            )
-            if on_submitted is not None:
-                on_submitted(angle, jobs[angle])
-        return jobs
-
 
 class FakeIngestor:
     def ingest(self, result: ProviderResult) -> StoredArtifact:
-        if "/view-" in result.job.endpoint:
-            output_name = f"{result.job.endpoint.rsplit('-', 1)[-1]}.png"
-        elif result.job.endpoint.endswith("edit_instruct"):
+        if result.job.endpoint.endswith("edit_instruct"):
             output_name = "same-shoe-navy.png"
         else:
             output_name = "original-shoe.png"
@@ -107,14 +81,12 @@ def create_node(
     prompt: str,
     x: float = 100,
     y: float = 100,
-    generate_views: bool = False,
 ) -> dict[str, object]:
     response = client.post(
         f"/api/projects/{project_id}/nodes",
         json={
             "prompt": prompt,
             "position": {"x": x, "y": y},
-            "settings": {"generate_views": generate_views},
         },
     )
     assert response.status_code == 201, response.text
@@ -441,17 +413,14 @@ def test_commit_is_idempotent_at_version_boundary(client: TestClient) -> None:
     assert [node.id for node in nodes] == [uuid.UUID(str(node["id"]))]
     assert edges == []
     version = versions[0]
-    assert tuple(version.provider_response_metadata["views"]) == VIEW_ORDER
-    assert version.provider_response_metadata["views"]["front"] == version.artifact_url
-    assert provider.view_requests == [
-        (angle, version.artifact_url) for angle in SUPPORTING_VIEWS
-    ]
-    assert tuple(version.provider_response_metadata["view_jobs"]) == SUPPORTING_VIEWS
+    assert len(provider.requests) == 1
+    assert version.provider_response_metadata == {
+        "fixture": True,
+        "seed_supported": False,
+    }
     saved = client.get(f"/api/projects/{project_id}/graph").json()
-    assert (
-        saved["nodes"][0]["versions"][0]["views"]
-        == (version.provider_response_metadata["views"])
-    )
+    assert saved["nodes"][0]["versions"][0]["artifact_url"] == version.artifact_url
+    assert "views" not in saved["nodes"][0]["versions"][0]
 
 
 @pytest.mark.parametrize("enabled", [True, False])
