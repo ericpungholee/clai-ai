@@ -1,5 +1,13 @@
 # Clai
 
+[![Watch the Clai demo](docs/screenshots/demo-thumbnail.jpg)](https://www.youtube.com/watch?v=RAJJLHVkAt4)
+
+![Projects gallery](docs/screenshots/projects.jpg)
+
+![Canvas graph of branched product edits](docs/screenshots/canvas-graph.png)
+
+![3D view of a generated product](docs/screenshots/3d-view.png)
+
 > **Award-winning foundation:** Clai builds on work that won 1st place and the Best Use of Google Gemini award among 82 teams at Hack Western. [View the original project on Devpost](https://devpost.com/software/vril).
 
 [![CI](https://github.com/ericpungholee/clai-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/ericpungholee/clai-ai/actions/workflows/ci.yml)
