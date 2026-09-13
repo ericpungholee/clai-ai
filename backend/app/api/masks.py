@@ -39,7 +39,13 @@ class Selection(BaseModel):
 def get_sam_selector() -> SamSelector:
     if settings.fal_api_key is None:
         raise HTTPException(503, "Image selection is unavailable: configure FAL_KEY")
-    return SamSelector(FalSdkTransport(settings.fal_api_key))
+    return SamSelector(
+        FalSdkTransport(
+            settings.fal_api_key,
+            timeout_seconds=settings.fal_timeout_seconds,
+            queue_timeout_seconds=settings.fal_queue_timeout_seconds,
+        )
+    )
 
 
 @router.put("/nodes/{node_id}/mask", response_model=MaskData | None)

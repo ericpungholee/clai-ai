@@ -21,7 +21,7 @@ def resolve_op(*, has_subject: bool, has_mask: bool, connect_count: int) -> Op:
         case True, True, False:
             return Op.EDIT_INPAINT
         case True, True, True:
-            return Op.EDIT_COMPOSITE
+            raise OperationRoutingError("Masked edits cannot accept reference images")
         case True, False, True:
             return Op.EDIT_REF_GUIDED
 

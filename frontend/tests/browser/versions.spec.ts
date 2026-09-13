@@ -68,3 +68,20 @@ test("result is a frozen picture with one way forward", async ({ page }) => {
     "My lamp",
   );
 });
+
+
+test("inspect switches between the five stored views and reopens on the front", async ({ page }) => {
+  await page.goto("/projects/fixture-project");
+  const source = page.locator('.react-flow__node[data-id="source"]');
+  await source.getByRole("button", { name: "Inspect result" }).click();
+  const dialog = page.getByRole("dialog");
+  for (const [angle, title] of [["front_right", "Front-right 45°"], ["rear_right", "Rear-right 135°"], ["rear_left", "Rear-left 225°"], ["front_left", "Front-left 315°"], ["front", "Hero / front"]]) {
+    await dialog.getByRole("button", { name: title, exact: true }).click();
+    await expect(dialog.getByRole("button", { name: title, exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByRole("img")).toHaveAttribute("src", `http://127.0.0.1:8109/artifacts/subject.svg${angle === "front" ? "" : `?view=${angle}`}`);
+  }
+  await dialog.getByRole("button", { name: "Rear-right 135°", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await source.getByRole("button", { name: "Inspect result" }).click();
+  await expect(page.getByRole("dialog").getByRole("button", { name: "Hero / front", exact: true })).toHaveAttribute("aria-pressed", "true");
+});

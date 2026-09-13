@@ -46,13 +46,6 @@ def validate_mask(mask: MaskSnapshot) -> bool:
     return bool(pixels.all())
 
 
-def mask_png(mask: MaskSnapshot) -> bytes:
-    pixels = decode_rle(mask.rle, mask.width, mask.height)
-    buffer = BytesIO()
-    Image.fromarray(pixels.astype(np.uint8) * 255).save(buffer, format="PNG")
-    return buffer.getvalue()
-
-
 def composite_masked_output(
     *, original: bytes, generated: bytes, mask: MaskSnapshot
 ) -> bytes:

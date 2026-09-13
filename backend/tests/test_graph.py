@@ -1,9 +1,11 @@
 import uuid
+from hashlib import sha256
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.domain.image_views import SUPPORTING_VIEWS, VIEW_ORDER
 from app.domain.runs import FrozenRunRequest
 from app.main import app
 from app.models.graph import GraphEdge, GraphNode, RunJob, Version
@@ -53,18 +55,25 @@ class FakeProvider:
         )
 
     def execute_views(
-        self, *, front_artifact_url: str, request: FrozenRunRequest
+        self,
+        *,
+        reference_urls: dict[str, str],
+        angles: tuple[str, ...],
+        request: FrozenRunRequest,
+        on_submitted=None,
     ) -> dict[str, ProviderJob]:
         jobs = {}
-        for angle in ("left", "back", "right"):
-            self.view_requests.append((angle, front_artifact_url))
+        for angle in angles:
+            self.view_requests.append((angle, reference_urls["front"]))
             jobs[angle] = ProviderJob(
                 provider="fake",
                 model="fixture-image-v1",
                 endpoint=f"fake/view-{angle}",
                 request_id=f"fake-view-{angle}-{len(self.requests)}",
-                request_payload={"image_urls": [front_artifact_url]},
+                request_payload={"image_urls": list(reference_urls.values())},
             )
+            if on_submitted is not None:
+                on_submitted(angle, jobs[angle])
         return jobs
 
 
@@ -81,7 +90,7 @@ class FakeIngestor:
             artifact_url=f"https://cdn.clai.test/{output_name}",
             content_type="image/png",
             byte_size=18,
-            sha256="a" * 64,
+            sha256=sha256(output_name.encode()).hexdigest(),
         )
 
 
@@ -98,10 +107,15 @@ def create_node(
     prompt: str,
     x: float = 100,
     y: float = 100,
+    generate_views: bool = False,
 ) -> dict[str, object]:
     response = client.post(
         f"/api/projects/{project_id}/nodes",
-        json={"prompt": prompt, "position": {"x": x, "y": y}},
+        json={
+            "prompt": prompt,
+            "position": {"x": x, "y": y},
+            "settings": {"generate_views": generate_views},
+        },
     )
     assert response.status_code == 201, response.text
     return response.json()
@@ -427,17 +441,17 @@ def test_commit_is_idempotent_at_version_boundary(client: TestClient) -> None:
     assert [node.id for node in nodes] == [uuid.UUID(str(node["id"]))]
     assert edges == []
     version = versions[0]
-    assert version.provider_response_metadata["views"] == {
-        "front": version.artifact_url,
-        "left": "https://cdn.clai.test/left.png",
-        "back": "https://cdn.clai.test/back.png",
-        "right": "https://cdn.clai.test/right.png",
-    }
+    assert tuple(version.provider_response_metadata["views"]) == VIEW_ORDER
+    assert version.provider_response_metadata["views"]["front"] == version.artifact_url
     assert provider.view_requests == [
-        ("left", version.artifact_url),
-        ("back", version.artifact_url),
-        ("right", version.artifact_url),
+        (angle, version.artifact_url) for angle in SUPPORTING_VIEWS
     ]
+    assert tuple(version.provider_response_metadata["view_jobs"]) == SUPPORTING_VIEWS
+    saved = client.get(f"/api/projects/{project_id}/graph").json()
+    assert (
+        saved["nodes"][0]["versions"][0]["views"]
+        == (version.provider_response_metadata["views"])
+    )
 
 
 @pytest.mark.parametrize("enabled", [True, False])

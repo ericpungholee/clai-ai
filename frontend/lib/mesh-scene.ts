@@ -23,7 +23,7 @@ import {
 } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { decalOrientation, projectLogo } from "./decal-geometry";
+import { autoPlaceLogo, decalOrientation, projectLogo } from "./decal-geometry";
 import type { DecalPlacement, MeshDecal } from "./mesh-decals";
 
 export type MeshScene = ReturnType<typeof createMeshScene>;
@@ -61,6 +61,7 @@ export function createMeshScene(
     loaded: () => void;
     error: (message: string) => void;
     placed: (placement: DecalPlacement) => void;
+    autoPlaced: (decal: MeshDecal) => void;
   },
 ) {
   const renderer = new WebGLRenderer({ antialias: true, alpha: false });
@@ -98,6 +99,7 @@ export function createMeshScene(
   let decalMesh: Mesh | null = null;
   let texture: Texture | null = null;
   let textureUrl: string | null = null;
+  let attemptedAutomatic = false;
   let frame = 0;
   let fitted = false;
   let pointer: { id: number; x: number; y: number; moved: boolean } | null =
@@ -176,6 +178,23 @@ export function createMeshScene(
   }
   function setDecal(next: MeshDecal | null) {
     decal = next;
+    if (
+      meshes.length &&
+      next?.source.mode === "auto" &&
+      !next.placement &&
+      !attemptedAutomatic
+    ) {
+      attemptedAutomatic = true;
+      const placed = autoPlaceLogo(meshes, next);
+      if (placed) {
+        decal = placed;
+        callbacks.autoPlaced(placed);
+      } else {
+        callbacks.error(
+          "The logo needs positioning. Choose Place logo, then click the front surface.",
+        );
+      }
+    }
     const nextUrl = next?.crop.dataUrl ?? null;
     if (textureUrl !== nextUrl) {
       textureUrl = nextUrl;
@@ -310,7 +329,7 @@ export function createMeshScene(
       });
       if (!meshes.length) throw new Error("Empty mesh");
       scene.add(model);
-      rebuildDecal();
+      setDecal(decal);
       callbacks.loaded();
       render();
     } catch {

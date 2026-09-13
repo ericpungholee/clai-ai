@@ -21,6 +21,9 @@ class NodeSettingsData(BaseModel):
     width: int = Field(default=1024, ge=1, le=4096)
     height: int = Field(default=1024, ge=1, le=4096)
     whiteBackground: bool = True
+    image_model: Literal["flare", "sunburst"] = "sunburst"
+    image_quality: Literal["high", "max"] = "max"
+    generate_views: bool = True
 
 
 class VersionData(BaseModel):
@@ -37,6 +40,7 @@ class VersionData(BaseModel):
     input_snapshot: dict[str, JsonValue]
     prompt_at_runtime: str
     edit_depth: int
+    views: dict[str, str] = Field(default_factory=dict)
     branch_node_ids: list[uuid.UUID] = Field(default_factory=list)
 
 

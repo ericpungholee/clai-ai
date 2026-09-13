@@ -1,44 +1,18 @@
 from app.core.config import Settings
-from app.domain.runs import FrozenRunRequest, Op
-from app.providers.base import (
-    ArtifactReader,
-    ProviderJob,
-    ProviderResult,
-)
+from app.providers.base import ArtifactReader
 from app.providers.fal_transport import FalSdkTransport
-from app.providers.flux_fill import FluxFillProvider
-from app.providers.nano_banana import NanoBananaProProvider
+from app.providers.gpt_image import GptImageProvider
 
 
-class FalImageProvider:
-    id = "fal"
-
+class FalImageProvider(GptImageProvider):
     def __init__(self, *, settings: Settings, artifact_reader: ArtifactReader):
         if settings.fal_api_key is None:
             raise ValueError("FAL_KEY is required")
-        transport = FalSdkTransport(
-            settings.fal_api_key, timeout_seconds=settings.fal_timeout_seconds
+        super().__init__(
+            transport=FalSdkTransport(
+                settings.fal_api_key,
+                timeout_seconds=settings.fal_timeout_seconds,
+                queue_timeout_seconds=settings.fal_queue_timeout_seconds,
+            ),
+            artifact_reader=artifact_reader,
         )
-        self.nano = NanoBananaProProvider(
-            transport=transport, artifact_reader=artifact_reader
-        )
-        self.fill = FluxFillProvider(
-            transport=transport, artifact_reader=artifact_reader
-        )
-
-    def execute(self, request: FrozenRunRequest) -> ProviderJob:
-        if request.op == Op.EDIT_INPAINT:
-            return self.fill.execute(request)
-        return self.nano.execute(request)
-
-    def execute_views(
-        self, *, front_artifact_url: str, request: FrozenRunRequest
-    ) -> dict[str, ProviderJob]:
-        return self.nano.execute_views(
-            front_artifact_url=front_artifact_url, request=request
-        )
-
-    def result(self, job: ProviderJob) -> ProviderResult:
-        if job.endpoint == self.fill.endpoint:
-            return self.fill.result(job)
-        return self.nano.result(job)

@@ -50,10 +50,11 @@ from app.services.run_queue import RunEnqueuer, get_run_enqueuer
 router = APIRouter(prefix="/api/projects", tags=["graph"])
 
 
-def get_project_or_404(project_id: uuid.UUID, db: Session) -> Project:
-    project = db.scalar(
-        select(Project).where(Project.id == project_id).with_for_update()
-    )
+def get_project_or_404(
+    project_id: uuid.UUID, db: Session, *, lock: bool = True
+) -> Project:
+    query = select(Project).where(Project.id == project_id)
+    project = db.scalar(query.with_for_update() if lock else query)
     if project is None or project.deleted_at is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
@@ -63,7 +64,7 @@ def get_project_or_404(project_id: uuid.UUID, db: Session) -> Project:
 
 @router.get("/{project_id}/graph", response_model=GraphDocument)
 def get_graph(project_id: uuid.UUID, db: Session = Depends(get_db)) -> GraphDocument:
-    get_project_or_404(project_id, db)
+    get_project_or_404(project_id, db, lock=False)
     return read_graph_document(project_id, db)
 
 
@@ -327,7 +328,7 @@ def get_run(
     job_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> RunJobData:
-    get_project_or_404(project_id, db)
+    get_project_or_404(project_id, db, lock=False)
     job = db.scalar(
         select(RunJob.id).where(RunJob.id == job_id, RunJob.project_id == project_id)
     )

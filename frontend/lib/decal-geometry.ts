@@ -1,13 +1,68 @@
 import {
+  Box3,
   BufferGeometry,
   Euler,
+  Matrix3,
   Matrix4,
   Mesh,
+  OrthographicCamera,
   Quaternion,
+  Raycaster,
+  Vector2,
   Vector3,
 } from "three";
 import { DecalGeometry } from "three/addons/geometries/DecalGeometry.js";
 import type { DecalPlacement, MeshDecal } from "./mesh-decals";
+
+/** Fit a fixed +Z front camera to the source subject, never the viewer viewport.
+ * TRELLIS does not return camera calibration, so this assumes an upright front view.
+ * Matching subject bounds compensates for source-image whitespace.
+ */
+export function autoPlaceLogo(meshes: Mesh[], decal: MeshDecal): MeshDecal | null {
+  const subject = decal.source.subjectBounds;
+  if (!subject || !meshes.length) return null;
+  const bounds = new Box3();
+  for (const mesh of meshes) bounds.union(new Box3().setFromObject(mesh));
+  const extent = bounds.getSize(new Vector3());
+  const width = extent.x / subject.width;
+  const height = extent.y / subject.height;
+  if (!(width > 0 && height > 0)) return null;
+  const left = bounds.min.x - subject.x * width;
+  const top = bounds.max.y + subject.y * height;
+  const camera = new OrthographicCamera(
+    left, left + width, top, top - height, 0.01, 10,
+  );
+  camera.position.set(0, 0, bounds.max.z + 2);
+  camera.updateMatrixWorld(true);
+  const crop = decal.source.bounds;
+  const raycaster = new Raycaster();
+  raycaster.setFromCamera(
+    new Vector2(
+      (crop.x + crop.width / 2) * 2 - 1,
+      1 - (crop.y + crop.height / 2) * 2,
+    ),
+    camera,
+  );
+  const hit = raycaster.intersectObjects(meshes, false)[0];
+  if (!hit?.face) return null;
+  const mesh = hit.object as Mesh;
+  const normal = (hit.normal ?? hit.face.normal)
+    .clone()
+    .applyNormalMatrix(new Matrix3().getNormalMatrix(mesh.matrixWorld));
+  // A grazing side surface is not a trustworthy front-logo placement.
+  if (normal.z < 0.4) return null;
+  const size = Math.max(crop.width * width, crop.height * height);
+  if (size <= 0 || size > 1) return null;
+  return {
+    ...decal,
+    size,
+    placement: {
+      meshIndex: meshes.indexOf(mesh),
+      position: hit.point.toArray(),
+      orientation: decalOrientation(normal, new Vector3(0, 1, 0)),
+    },
+  };
+}
 
 export function decalOrientation(
   normal: Vector3,
@@ -43,7 +98,7 @@ export function projectLogo(mesh: Mesh, decal: MeshDecal) {
   const height = decal.size / Math.max(1, aspect);
   const position = new Vector3().fromArray(placement.position);
   // Reject distant triangles with a cheap bounds check before DecalGeometry allocates
-  // clipping vertices. Real cached Tripo meshes have hundreds of thousands of faces.
+  // clipping vertices on dense generated meshes.
   const toProjector = new Matrix4()
     .compose(position, orientation, new Vector3(1, 1, 1))
     .invert()

@@ -1,10 +1,11 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { PromptPart } from "@/lib/graph";
+import type { NodeSettings, PromptPart } from "@/lib/graph";
 
 type DesignNodeActions = {
   updateTitle: (nodeId: string, title: string) => void;
+  updateSettings: (nodeId: string, settings: Partial<NodeSettings>) => void;
   selectVersion: (nodeId: string, versionId: string) => void;
   branchVersion: (nodeId: string, versionId: string) => void;
   collapseVersion: (versionId: string) => void;

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { DownloadButton } from "./download-button";
-import type { Version } from "@/lib/graph";
+import { IMAGE_VIEWS, type Version } from "@/lib/graph";
 
 export function ImageViewer({
   versions: initialVersions,
@@ -51,6 +51,8 @@ export function ImageViewer({
 }
 
 function ImagePane({ version, label }: { version: Version; label: string }) {
+  const [angle, setAngle] = useState<(typeof IMAGE_VIEWS)[number][0]>("front");
+  const imageUrl = version.views?.[angle] ?? version.artifact_url;
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number } | null>(null);
   const zoom = (factor: number) =>
@@ -72,9 +74,26 @@ function ImagePane({ version, label }: { version: Version; label: string }) {
           <button aria-label="Zoom in" onClick={() => zoom(1.25)}>
             +
           </button>
-          <DownloadButton url={version.artifact_url} name={`${label}-${version.id}`} label="Download original" />
+          <DownloadButton url={imageUrl} name={`${label}-${version.id}-${angle}`} label="Download original" />
         </div>
       </div>
+      {version.views?.rear_right && (
+        <nav aria-label={`${label} views`} className="flex gap-2 text-xs">
+          {IMAGE_VIEWS.map(([item, title]) => (
+            <button
+              key={item}
+              aria-pressed={angle === item}
+              className={`rounded border px-3 py-1 capitalize ${angle === item ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300"}`}
+              onClick={() => {
+                setAngle(item);
+                setView({ scale: 1, x: 0, y: 0 });
+              }}
+            >
+              {title}
+            </button>
+          ))}
+        </nav>
+      )}
       <div
         className="relative flex min-h-0 flex-1 cursor-grab items-center justify-center overflow-hidden rounded-lg bg-white touch-none active:cursor-grabbing"
         onWheel={(event) => {
@@ -105,7 +124,7 @@ function ImagePane({ version, label }: { version: Version; label: string }) {
         {/* The source is the original stored artifact, never a resized thumbnail. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={version.artifact_url}
+          src={imageUrl}
           alt={label}
           draggable={false}
           className="max-h-full max-w-full object-contain"

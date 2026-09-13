@@ -1,7 +1,9 @@
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
 from app.domain.runs import FrozenRunRequest
+from app.providers.fal_transport import FalTransport
 
 
 @dataclass(frozen=True)
@@ -52,7 +54,24 @@ class ImageProvider(Protocol):
     def execute(self, request: FrozenRunRequest) -> ProviderJob: ...
 
     def execute_views(
-        self, *, front_artifact_url: str, request: FrozenRunRequest
+        self,
+        *,
+        reference_urls: Mapping[str, str],
+        angles: Sequence[str],
+        request: FrozenRunRequest,
+        on_submitted: Callable[[str, ProviderJob], None] | None = None,
     ) -> dict[str, ProviderJob]: ...
 
     def result(self, job: ProviderJob) -> ProviderResult: ...
+
+
+class MeshProvider(Protocol):
+    transport: FalTransport
+    artifact_reader: ArtifactReader
+    supports_multiview: bool
+
+    def endpoint_for(self, source_urls: Sequence[str]) -> str: ...
+
+    def prepare(
+        self, *, source_urls: Sequence[str], textured: bool = True
+    ) -> dict[str, object]: ...

@@ -242,6 +242,11 @@ def _node_snapshot(node: GraphNode) -> NodeSnapshot:
             white_background=_setting_boolean(
                 settings, "whiteBackground", default=True
             ),
+            # New runs use the fidelity policy, including drafts saved before it.
+            # Already queued jobs retain the settings in their frozen request.
+            image_model="sunburst",
+            image_quality="max",
+            generate_views=True,
         ),
         seed=node.seed,
         mask=mask,

@@ -52,7 +52,6 @@ def fixed_seed(value: int = 314) -> Callable[[], int]:
         (False, False, 1, Op.GENERATE_REF),
         (True, False, 0, Op.EDIT_INSTRUCT),
         (True, True, 0, Op.EDIT_INPAINT),
-        (True, True, 1, Op.EDIT_COMPOSITE),
         (True, False, 1, Op.EDIT_REF_GUIDED),
     ],
 )
@@ -281,18 +280,13 @@ def test_edit_prompt_uses_the_accepted_preamble_exactly() -> None:
 
 
 @pytest.mark.parametrize("op", [Op.GENERATE, Op.GENERATE_REF])
-def test_generate_prompt_uses_vril_front_studio_framing(op: Op) -> None:
-    assert build_prompt(user_prompt="  a navy shoe  ", op=op) == (
-        "Create a professional studio product photograph of a navy shoe, "
-        "shot from a front view at eye level, perfectly centered. "
-        "Photograph the product on a pure white background with professional "
-        "studio lighting that creates soft, subtle shadows. Use sharp focus "
-        "to capture clear, well-defined edges. Center the product in the frame "
-        "and fill the frame while ensuring the entire product is visible - "
-        "nothing should be cropped or cut off. The design should be consistent "
-        "and suitable for viewing from multiple camera angles. Avoid any text "
-        "overlays, watermarks, or distracting elements."
-    )
+def test_generate_prompt_keeps_product_scope_and_prints(op: Op) -> None:
+    prompt = build_prompt(user_prompt="  a navy shoe  ", op=op)
+    assert "a navy shoe" in prompt and "front view at eye level" in prompt
+    assert "pure white background" in prompt
+    assert "Product graphics, printed text and logos" in prompt
+    assert "only the requested object and components" in prompt
+    assert "Missing components are intentional; do not complete an assembly" in prompt
 
 
 @pytest.mark.parametrize("op", [Op.GENERATE, Op.GENERATE_REF])

@@ -2,12 +2,19 @@ import { decodeMask } from "./mask-rle.ts";
 import type { MaskData } from "./graph";
 
 export type LogoCrop = { dataUrl: string; width: number; height: number };
+export type LogoBounds = { x: number; y: number; width: number; height: number };
 export type DecalPlacement = {
   meshIndex: number;
   position: [number, number, number];
   orientation: [number, number, number, number];
 };
 export type MeshDecal = {
+  source: {
+    url: string;
+    bounds: LogoBounds;
+    subjectBounds?: LogoBounds | null;
+    mode: "auto" | "manual";
+  };
   crop: LogoCrop;
   placement: DecalPlacement | null;
   // Fraction of the normalized model's longest dimension; aspect ratio is locked.

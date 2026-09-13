@@ -1,10 +1,12 @@
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.domain.image_views import SUPPORTING_VIEWS, view_urls
 from app.domain.runs import FrozenRunRequest
 from app.models.graph import GraphNode, RunJob, Version
 from app.models.project import Project
@@ -25,10 +27,11 @@ def execute_run_job(
     ingestor: ArtifactIngestor,
 ) -> uuid.UUID:
     run_started = time.monotonic()
-    request = _claim_job(job_id=job_id, session_factory=session_factory)
+    frozen_payload = _claim_job(job_id=job_id, session_factory=session_factory)
     provider_started: float | None = None
     provider_elapsed: float | None = None
     try:
+        request = decode_frozen_request(frozen_payload)
         provider_started = time.monotonic()
         provider_job = provider.execute(request)
         _record_provider_job(
@@ -48,19 +51,68 @@ def execute_run_job(
             artifact = ingestor.ingest_masked(result, request)
         else:
             artifact = ingestor.ingest(result)
-        view_jobs = provider.execute_views(
-            front_artifact_url=artifact.artifact_url,
-            request=request,
-        )
-        if tuple(view_jobs) != ("left", "back", "right"):
-            raise RunExecutionError("Image provider returned an invalid set of views")
-        view_urls = {"front": artifact.artifact_url}
-        for angle, view_job in view_jobs.items():
-            view_result = provider.result(view_job)
-            view_urls[angle] = ingestor.ingest(view_result).artifact_url
+        stored_views = {"front": artifact.artifact_url}
+        view_hashes = {artifact.sha256}
+        view_metadata = {}
+
+        def record_view(angle: str, view_job: ProviderJob) -> None:
+            # Record each paid submission before attempting another submission.
+            view_metadata[angle] = {
+                "reference_views": {"front": artifact.artifact_url},
+                "model": view_job.model,
+                "endpoint": view_job.endpoint,
+                "request_id": view_job.request_id,
+                "request_payload": view_job.request_payload,
+            }
+            with session_factory.begin() as db:
+                _lock_job(db, job_id).provider_response_metadata = {
+                    **result.response_metadata,
+                    "view_jobs": view_metadata.copy(),
+                    "views": stored_views.copy(),
+                }
+
+        if request.settings.generate_views:
+            angles = SUPPORTING_VIEWS
+            view_jobs = provider.execute_views(
+                reference_urls={"front": artifact.artifact_url},
+                angles=angles,
+                request=request,
+                on_submitted=record_view,
+            )
+            if tuple(view_jobs) != angles:
+                raise RunExecutionError(
+                    "Image provider returned an invalid set of views"
+                )
+
+            def collect(view_job: ProviderJob) -> StoredArtifact:
+                return ingestor.ingest(provider.result(view_job))
+
+            # All four edit jobs are already queued. Download and validate together;
+            # no database sessions cross thread boundaries.
+            with ThreadPoolExecutor(max_workers=len(angles)) as pool:
+                stored_results = list(pool.map(collect, view_jobs.values()))
+            for angle, stored in zip(angles, stored_results, strict=True):
+                if stored.sha256 in view_hashes:
+                    raise RunExecutionError(
+                        "Image provider returned duplicate view images"
+                    )
+                view_hashes.add(stored.sha256)
+                stored_views[angle] = stored.artifact_url
+                view_metadata[angle] = {
+                    **view_metadata[angle],
+                    "artifact_sha256": stored.sha256,
+                    "artifact_storage_key": stored.storage_key,
+                }
         response_metadata = {
             **result.response_metadata,
-            "views": view_urls,
+            "views": view_urls(
+                front_url=artifact.artifact_url, metadata={"views": stored_views}
+            ),
+            "view_jobs": view_metadata,
+            "views_origin": "generated"
+            if request.settings.generate_views
+            else "source",
+            "seed_supported": False,
         }
         return _commit_version(
             job_id=job_id,
@@ -86,7 +138,7 @@ def execute_run_job(
 
 def _claim_job(
     *, job_id: uuid.UUID, session_factory: sessionmaker[Session]
-) -> FrozenRunRequest:
+) -> dict[str, object]:
     with session_factory.begin() as db:
         job = db.scalar(select(RunJob).where(RunJob.id == job_id).with_for_update())
         if job is None:
@@ -103,7 +155,7 @@ def _claim_job(
         job.status = "dispatching"
         job.attempts += 1
         job.started_at = datetime.now(UTC)
-        return decode_frozen_request(job.frozen_request)
+        return job.frozen_request
 
 
 def _record_provider_job(
@@ -198,6 +250,7 @@ def _commit_version(
         if project is not None:
             project.thumbnail_url = artifact.artifact_url
             project.updated_at = datetime.now(UTC)
+        job.provider_response_metadata = response_metadata
         job.status = "complete"
         job.completed_at = datetime.now(UTC)
         job.total_elapsed_seconds = total_elapsed_seconds

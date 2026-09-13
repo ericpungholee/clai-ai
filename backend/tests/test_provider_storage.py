@@ -1,11 +1,14 @@
 from collections.abc import Mapping
 from io import BytesIO
 from pathlib import Path
+from threading import Lock
 
 import httpx
 import pytest
+from fal_client import Completed, FalClientHTTPError, Queued
 from PIL import Image
 
+from app.domain.image_views import SUPPORTING_VIEWS, VIEW_ORDER
 from app.domain.runs import (
     FrozenRunRequest,
     InputSnapshot,
@@ -24,9 +27,9 @@ from app.providers.base import (
     ProviderResult,
 )
 from app.providers.fal_transport import FalAccountError, FalSdkTransport
-from app.providers.nano_banana import (
+from app.providers.gpt_image import (
     VIEW_PROMPTS,
-    NanoBananaProProvider,
+    GptImageProvider,
 )
 from app.providers.trellis import TrellisProvider
 from app.services.run_freezing import freeze_run_request
@@ -54,6 +57,7 @@ class FakeArtifactReader:
 class FakeFalTransport:
     def __init__(self) -> None:
         self.uploads: list[tuple[bytes, str]] = []
+        self.upload_lock = Lock()
         self.submissions: list[tuple[str, dict[str, object]]] = []
         self.response: dict[str, object] = {
             "images": [
@@ -68,8 +72,9 @@ class FakeFalTransport:
         }
 
     def upload(self, *, content: bytes, filename: str) -> str:
-        self.uploads.append((content, filename))
-        return f"https://v3.fal.media/input-{len(self.uploads)}.png"
+        with self.upload_lock:
+            self.uploads.append((content, filename))
+            return f"https://v3.fal.media/input-{len(self.uploads)}.png"
 
     def submit(self, *, endpoint: str, payload: dict[str, object]) -> str:
         self.submissions.append((endpoint, payload))
@@ -77,8 +82,8 @@ class FakeFalTransport:
 
     def result(self, *, endpoint: str, request_id: str) -> dict[str, object]:
         assert endpoint in {
-            NanoBananaProProvider.generate_endpoint,
-            NanoBananaProProvider.edit_endpoint,
+            GptImageProvider.generate_endpoint,
+            GptImageProvider.edit_endpoint,
         }
         assert request_id == "fal-request-1"
         return self.response
@@ -88,17 +93,18 @@ class FakeFalClient:
     def upload_file(self, path: str) -> str:
         return f"https://v3.fal.media/{Path(path).name}"
 
-    def result(self, application: str, request_id: str) -> object:
-        return {"application": application, "request_id": request_id}
-
 
 class FakeFalHandle:
-    def __init__(self) -> None:
-        self.intervals: list[float] = []
+    response_url = "https://queue.fal.test/result"
 
-    def get(self, *, interval: float) -> object:
-        self.intervals.append(interval)
-        return {"pbr_model": {"url": "https://provider.test/model.glb"}}
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def status(self, *, with_logs=False):
+        self.calls += 1
+        return (
+            Queued(position=0) if self.calls == 1 else Completed(logs=None, metrics={})
+        )
 
 
 class FakeHandleFalClient(FakeFalClient):
@@ -176,7 +182,7 @@ def request(
 
 def provider_for(
     versions: tuple[VersionSnapshot, ...] = (),
-) -> tuple[NanoBananaProProvider, FakeFalTransport, FakeArtifactReader]:
+) -> tuple[GptImageProvider, FakeFalTransport, FakeArtifactReader]:
     artifacts = {
         item.artifact_url: ArtifactBytes(
             content=f"bytes-{item.id}".encode(),
@@ -188,7 +194,7 @@ def provider_for(
     transport = FakeFalTransport()
     reader = FakeArtifactReader(artifacts)
     return (
-        NanoBananaProProvider(transport=transport, artifact_reader=reader),
+        GptImageProvider(transport=transport, artifact_reader=reader),
         transport,
         reader,
     )
@@ -199,61 +205,49 @@ def test_generate_uses_text_endpoint_without_uploads() -> None:
 
     job = provider.execute(request(Op.GENERATE))
 
-    assert job.endpoint == "fal-ai/nano-banana-pro"
-    assert job.model == "gemini-3-pro-image"
+    assert job.endpoint == "openai/gpt-image-2.5/sunburst/text-to-image"
+    assert job.model == "gpt-image-2.5-sunburst"
     assert reader.read_urls == []
     assert transport.uploads == []
     assert transport.submissions == [
         (
-            "fal-ai/nano-banana-pro",
+            "openai/gpt-image-2.5/sunburst/text-to-image",
             {
                 "prompt": "runtime prompt",
                 "num_images": 1,
-                "seed": 123,
-                "aspect_ratio": "1:1",
+                "image_size": {"width": 1024, "height": 1024},
                 "output_format": "png",
-                "resolution": "1K",
-                "limit_generations": True,
-                "enable_web_search": False,
+                "quality": "max",
             },
         )
     ]
 
 
-def test_view_generation_uses_front_for_three_separate_edit_requests() -> None:
-    front_url = "https://cdn.clai.test/front.png"
-    transport = FakeFalTransport()
-    reader = FakeArtifactReader(
-        {
-            front_url: ArtifactBytes(
-                content=b"front-image", content_type="image/png", filename="front.png"
-            )
-        }
-    )
-    provider = NanoBananaProProvider(transport=transport, artifact_reader=reader)
-
+def test_all_supporting_views_reference_only_the_hero_without_category_prompt():
+    provider, transport, reader = provider_for((version("front"),))
+    front = version("front").artifact_url
     jobs = provider.execute_views(
-        front_artifact_url=front_url, request=request(Op.GENERATE)
+        reference_urls={"front": front},
+        angles=SUPPORTING_VIEWS,
+        request=request(Op.GENERATE),
     )
-
-    assert list(jobs) == ["left", "back", "right"]
-    assert reader.read_urls == [front_url]
-    assert transport.uploads == [(b"front-image", "front.png")]
-    assert [endpoint for endpoint, _ in transport.submissions] == [
-        "fal-ai/nano-banana-pro/edit"
-    ] * 3
-    for (angle, expected_prompt), (_, payload) in zip(
-        VIEW_PROMPTS.items(), transport.submissions, strict=True
+    assert tuple(jobs) == SUPPORTING_VIEWS
+    assert reader.read_urls == [front]
+    assert len(transport.uploads) == 1
+    for angle, (endpoint, payload) in zip(
+        SUPPORTING_VIEWS, transport.submissions, strict=True
     ):
-        assert angle in jobs
-        assert payload["prompt"] == expected_prompt
-        assert payload["image_urls"] == ["https://v3.fal.media/input-1.png"]
+        assert endpoint == GptImageProvider.edit_endpoint
+        assert payload["prompt"] == VIEW_PROMPTS[angle]
+        assert "runtime prompt" not in payload["prompt"]
+        assert payload["quality"] == "max"
         assert payload["num_images"] == 1
+        assert payload["image_urls"] == ["https://v3.fal.media/input-1.png"]
 
 
-def test_four_raw_outputs_are_stored_and_uploaded_to_trellis_unchanged(tmp_path):
+def test_five_raw_outputs_are_stored_and_uploaded_to_trellis_unchanged(tmp_path):
     raw_images = []
-    for color in ("red", "green", "blue", "yellow"):
+    for color in ("red", "green", "blue", "yellow", "purple"):
         output = BytesIO()
         Image.new("RGB", (8, 8), color).save(output, "PNG")
         raw_images.append(output.getvalue())
@@ -262,21 +256,17 @@ def test_four_raw_outputs_are_stored_and_uploaded_to_trellis_unchanged(tmp_path)
             f"https://fal.test/{angle}.png": ArtifactBytes(
                 data, "image/png", f"{angle}.png"
             )
-            for angle, data in zip(
-                ("front", "left", "back", "right"), raw_images, strict=True
-            )
+            for angle, data in zip(VIEW_ORDER, raw_images, strict=True)
         }
     )
     store = FileArtifactStore(root=tmp_path, public_base_url="https://clai.test")
     ingestor = ArtifactIngestor(reader=output_reader, store=store)
     stored_urls = []
-    for angle, url in zip(
-        ("front", "left", "back", "right"), output_reader.artifacts, strict=True
-    ):
+    for angle, url in zip(VIEW_ORDER, output_reader.artifacts, strict=True):
         job = ProviderJob(
             "fal",
-            "gemini-3-pro-image",
-            "fal-ai/nano-banana-pro/edit",
+            "gpt-image-2.5-sunburst",
+            "openai/gpt-image-2.5/sunburst/edit",
             angle,
             {},
         )
@@ -288,10 +278,11 @@ def test_four_raw_outputs_are_stored_and_uploaded_to_trellis_unchanged(tmp_path)
     payload = TrellisProvider(transport, reader).prepare(source_urls=stored_urls)
 
     assert [reader.read(url).content for url in stored_urls] == raw_images
-    assert [content for content, _ in transport.uploads] == raw_images
-    assert payload["image_urls"] == [
-        f"https://v3.fal.media/input-{index}.png" for index in range(1, 5)
-    ]
+    uploaded = {
+        f"https://v3.fal.media/input-{index}.png": content
+        for index, (content, _) in enumerate(transport.uploads, 1)
+    }
+    assert [uploaded[url] for url in payload["image_urls"]] == raw_images
 
 
 def test_sdk_transport_submits_paid_request_exactly_once() -> None:
@@ -323,19 +314,29 @@ def test_sdk_transport_submits_paid_request_exactly_once() -> None:
     assert calls == 1
 
 
-def test_sdk_transport_throttles_queue_result_polling() -> None:
+def test_sdk_transport_throttles_queue_result_polling(monkeypatch) -> None:
+    sleeps = []
+    monkeypatch.setattr("app.providers.fal_transport.time.sleep", sleeps.append)
     client = FakeHandleFalClient()
     transport = FalSdkTransport(
         "fixture-key",
         client=client,
         queue_poll_interval_seconds=1.5,
+        queue_client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200, json={"pbr_model": {"url": "https://provider.test/model.glb"}}
+                )
+            )
+        ),
     )
 
     result = transport.result(endpoint="fal-ai/trellis-2/multi", request_id="request-1")
 
     assert result["pbr_model"] == {"url": "https://provider.test/model.glb"}
     assert client.applications == [("fal-ai/trellis-2/multi", "request-1")]
-    assert client.handle.intervals == [1.5]
+    assert sleeps == [1.5]
+    assert client.handle.calls == 2
 
 
 def test_sdk_transport_does_not_retry_failed_paid_submission() -> None:
@@ -362,7 +363,31 @@ def test_sdk_transport_does_not_retry_failed_paid_submission() -> None:
     assert calls == 1
 
 
-@pytest.mark.parametrize("operation", ["upload", "submit"])
+def test_sdk_transport_bounds_a_stalled_provider_without_resubmission(monkeypatch):
+    client = FakeHandleFalClient()
+    client.handle.status = lambda **kwargs: Queued(position=0)
+    clock = iter([0.0, 0.0, 2.0])
+    monkeypatch.setattr(
+        "app.providers.fal_transport.time.monotonic", lambda: next(clock)
+    )
+    monkeypatch.setattr("app.providers.fal_transport.time.sleep", lambda _: None)
+    http_calls = []
+    transport = FalSdkTransport(
+        "fixture-key",
+        client=client,
+        queue_timeout_seconds=1,
+        queue_client=httpx.Client(
+            transport=httpx.MockTransport(lambda request: http_calls.append(request))
+        ),
+    )
+    with pytest.raises(TimeoutError, match="request-1 is recorded"):
+        transport.result(endpoint="fal-ai/trellis-2/multi", request_id="request-1")
+    assert http_calls == []
+
+
+@pytest.mark.parametrize(
+    "operation", ["upload", "sdk_upload", "submit", "status", "result"]
+)
 @pytest.mark.parametrize(
     "detail", ["User is locked. Reason: Exhausted balance.", "Forbidden"]
 )
@@ -375,28 +400,51 @@ def test_sdk_transport_explains_exhausted_balance_without_retry(operation, detai
 
     class RejectedUploadClient(FakeFalClient):
         def upload_file(self, path):
-            respond(
+            response = respond(
                 httpx.Request("POST", "https://rest.fal.ai/storage/auth/token")
-            ).raise_for_status()
+            )
+            if operation == "sdk_upload":
+                raise FalClientHTTPError(detail, 403, {}, response)
+            response.raise_for_status()
+
+    class RejectedStatusClient(RejectedUploadClient):
+        def get_handle(self, application, request_id):
+            handle = FakeFalHandle()
+
+            def status(**kwargs):
+                if operation == "status":
+                    response = respond(
+                        httpx.Request("GET", "https://queue.fal.test/status")
+                    )
+                    raise FalClientHTTPError(detail, 403, {}, response)
+                return Completed(logs=None, metrics={})
+
+            handle.status = status
+            return handle
 
     transport = FalSdkTransport(
         "fixture-key",
-        client=RejectedUploadClient(),
+        client=RejectedStatusClient(),
         queue_client=httpx.Client(transport=httpx.MockTransport(respond)),
     )
-    expected_error = (
-        FalAccountError if "Exhausted balance" in detail else httpx.HTTPStatusError
-    )
-    with pytest.raises(expected_error) as caught:
-        if operation == "upload":
+    with pytest.raises(FalAccountError) as caught:
+        if operation in {"upload", "sdk_upload"}:
             transport.upload(content=b"fixture", filename="fixture.png")
-        else:
+        elif operation == "submit":
             transport.submit(endpoint="fal-ai/model", payload={"prompt": "fixture"})
+        else:
+            transport.result(endpoint="fal-ai/model", request_id="existing-request")
     assert len(calls) == 1
     assert "fixture-key" not in str(caught.value)
-    if expected_error is FalAccountError:
+    if "Exhausted balance" in detail:
         assert "https://fal.ai/dashboard/billing" in str(caught.value)
+        assert "If that account has credits" in str(caught.value)
+        assert "support@fal.ai" in str(caught.value)
         assert "then retry" in str(caught.value)
+    else:
+        assert "denied access (403)" in str(caught.value)
+        assert "exhausted" not in str(caught.value)
+        assert "https://queue.fal.test" not in str(caught.value)
 
 
 def test_edit_uploads_clai_bytes_and_preserves_subject_then_connect_order() -> None:
@@ -409,21 +457,20 @@ def test_edit_uploads_clai_bytes_and_preserves_subject_then_connect_order() -> N
         request(Op.EDIT_REF_GUIDED, subject=subject, connects=(first, second))
     )
 
-    assert job.endpoint == "fal-ai/nano-banana-pro/edit"
-    assert reader.read_urls == [
+    assert job.endpoint == "openai/gpt-image-2.5/sunburst/edit"
+    assert set(reader.read_urls) == {
         subject.artifact_url,
         first.artifact_url,
         second.artifact_url,
-    ]
-    assert transport.uploads == [
-        (b"bytes-subject", "subject.png"),
-        (b"bytes-first", "first.png"),
-        (b"bytes-second", "second.png"),
-    ]
-    assert job.request_payload["image_urls"] == [
-        "https://v3.fal.media/input-1.png",
-        "https://v3.fal.media/input-2.png",
-        "https://v3.fal.media/input-3.png",
+    }
+    uploaded = {
+        f"https://v3.fal.media/input-{index}.png": content
+        for index, (content, _) in enumerate(transport.uploads, 1)
+    }
+    assert [uploaded[url] for url in job.request_payload["image_urls"]] == [
+        b"bytes-subject",
+        b"bytes-first",
+        b"bytes-second",
     ]
 
 
@@ -433,7 +480,7 @@ def test_generate_ref_uses_edit_endpoint_with_connect_images() -> None:
 
     job = provider.execute(request(Op.GENERATE_REF, connects=(reference,)))
 
-    assert job.endpoint == "fal-ai/nano-banana-pro/edit"
+    assert job.endpoint == "openai/gpt-image-2.5/sunburst/edit"
     assert job.request_payload["image_urls"] == ["https://v3.fal.media/input-1.png"]
 
 
@@ -442,7 +489,7 @@ def test_provider_never_silently_drops_a_mask() -> None:
     mask = MaskSnapshot("rle", 8, 8, subject_version_id="subject")
     provider, transport, _ = provider_for((subject,))
 
-    with pytest.raises(ProviderContractError, match="cannot execute"):
+    with pytest.raises(ValueError, match="invalid"):
         provider.execute(request(Op.EDIT_INPAINT, subject=subject, mask=mask))
 
     assert transport.submissions == []
@@ -451,7 +498,7 @@ def test_provider_never_silently_drops_a_mask() -> None:
 def test_provider_rejects_resolution_above_capability() -> None:
     provider, transport, _ = provider_for()
 
-    with pytest.raises(ProviderContractError, match="exceeds"):
+    with pytest.raises(ProviderContractError, match="3840"):
         provider.execute(
             request(
                 Op.GENERATE,
@@ -552,8 +599,8 @@ def test_ingestor_downloads_provider_output_before_returning_durable_url(
     result = ProviderResult(
         job=ProviderJob(
             provider="fal",
-            model="gemini-3-pro-image",
-            endpoint="fal-ai/nano-banana-pro/edit",
+            model="gpt-image-2.5-sunburst",
+            endpoint="openai/gpt-image-2.5/sunburst/edit",
             request_id="request-123",
             request_payload={},
         ),
@@ -629,7 +676,7 @@ def test_navy_shoe_acceptance_path_uses_only_fakes(tmp_path: Path) -> None:
             )
         }
     )
-    provider = NanoBananaProProvider(
+    provider = GptImageProvider(
         transport=transport,
         artifact_reader=artifact_reader,
     )
@@ -658,6 +705,23 @@ def test_navy_shoe_acceptance_path_uses_only_fakes(tmp_path: Path) -> None:
     assert frozen.op is Op.EDIT_INSTRUCT
     assert frozen.seed == subject.seed
     assert transport.uploads == [(b"original-shoe", "shoe.jpg")]
-    assert job.endpoint == "fal-ai/nano-banana-pro/edit"
+    assert job.endpoint == "openai/gpt-image-2.5/sunburst/edit"
     assert job.request_payload["prompt"] == frozen.prompt_at_runtime
     assert (tmp_path / "artifacts" / stored.storage_key).read_bytes() == content
+
+
+def test_non_json_result_forbidden_is_safe_and_does_not_claim_exhausted_balance():
+    transport = FalSdkTransport(
+        "fixture-key",
+        client=FakeHandleFalClient(),
+        queue_client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(403, text="private-provider-detail")
+            )
+        ),
+        queue_poll_interval_seconds=0.001,
+    )
+    with pytest.raises(FalAccountError, match="denied access") as caught:
+        transport.result(endpoint="fal-ai/model", request_id="existing-request")
+    assert "private-provider-detail" not in str(caught.value)
+    assert "exhausted" not in str(caught.value)

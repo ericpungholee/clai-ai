@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     fal_key: SecretStr | None = None
     fal_timeout_seconds: float = 120.0
+    fal_queue_timeout_seconds: float = 900.0
     fal_output_hosts: str = "v3.fal.media,v3b.fal.media"
 
     artifact_storage_backend: Literal["filesystem", "s3"] = "filesystem"

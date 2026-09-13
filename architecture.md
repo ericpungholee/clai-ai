@@ -1,6 +1,6 @@
 # Clai architecture
 
-This guide describes the code inspected on September 6, 2026, including the existing local UI/export changes. It documents implemented behavior, not a proposed design. Provider identifiers describe the configured adapters; they are not claims about current provider pricing or capabilities beyond this code.
+This guide describes the code inspected on September 13, 2026, including the existing local UI/export changes. It documents implemented behavior, not a proposed design. Provider identifiers describe the configured adapters; they are not claims about current provider pricing or capabilities beyond this code.
 
 ## 1. System model
 
@@ -38,7 +38,7 @@ flowchart LR
 | `backend/app/models/` | SQLAlchemy persistence models and relational constraints. |
 | `backend/app/domain/` | Immutable run snapshots, operation vocabulary, and structured prompt parts. |
 | `backend/app/services/` | Graph mutations, input resolution/freezing, run and mesh execution, and masks. |
-| `backend/app/providers/` | fal transport and Nano Banana Pro, FLUX Fill, SAM, and Tripo adapters. |
+| `backend/app/providers/` | fal transport and GPT Image 2.5 Flare/Sunburst, SAM, Hunyuan 3D v3.1 Rapid and TRELLIS.2 adapters. |
 | `backend/app/storage/` | Filesystem/S3 stores, artifact readers, image ingestion, and GLB validation. |
 | `backend/app/workers/celery_app.py` | Celery configuration, dependency construction, and image/mesh task entry points. |
 | `backend/alembic/` | Ordered schema/data migrations, including PostgreSQL triggers. |
@@ -59,7 +59,6 @@ erDiagram
     GRAPH_NODE ||--o{ VERSION : retains
     GRAPH_NODE ||--o{ GRAPH_EDGE : source_or_target
     VERSION ||--o{ GRAPH_EDGE : pinned_subject
-    VERSION ||--o| VERSION_METRIC : measures
     VERSION ||--o| VERSION_MESH : caches
 ```
 
@@ -119,7 +118,7 @@ The [prompt editor](frontend/components/graph/prompt-editor.tsx) manages editabl
 
 [compile_document](backend/app/domain/prompts.py) replaces chips with `image 1`, `image 2`, etc. References start at 2 when a subject occupies image 1. Provider uploads use the same subject-first/reference-order sequence. Node titles label UI inputs but are not added as hidden prompt context.
 
-New nodes default to 1:1, 1024×1024, White bg on, and no explicit seed. These settings remain in the API; the current UI has no White bg toggle. Continue editing inherits the source node's settings unless a branch request overrides them. Seed resolution chooses the draft seed, then subject seed, then a random 32-bit value. Duplicate requests copy draft inputs, references with new edge IDs, mask, and settings; the API supports `fresh_seed`, while the current UI exposes ordinary draft duplication only.
+New nodes default to 1:1, 1024×1024, White bg on, Sunburst/max, five views, and no explicit seed. New runs freeze Sunburst/max/five-view policy even for drafts with earlier speed settings. Existing frozen jobs keep their recorded settings. The image model and view toggles are no longer exposed. These settings remain in the API; the current UI has no White bg toggle. Continue editing inherits the source node's settings unless a branch request overrides them. Seed resolution chooses the draft seed, then subject seed, then a random 32-bit value. Duplicate requests copy draft inputs, references with new edge IDs, mask, and settings; the API supports `fresh_seed`, while the current UI exposes ordinary draft duplication only.
 
 ## 6. Image generation lifecycle
 
@@ -163,17 +162,19 @@ The route commits before enqueueing. An observed enqueue failure marks a still-q
 
 | Inputs | Operation | Adapter / configured endpoint |
 | --- | --- | --- |
-| No subject or references | `generate` | Nano Banana Pro: `fal-ai/nano-banana-pro` |
-| References, no subject | `generate_ref` | Nano Banana Pro edit endpoint: `fal-ai/nano-banana-pro/edit` |
-| Subject only | `edit_instruct` | Nano Banana Pro edit endpoint |
-| Subject and references | `edit_ref_guided` | Nano Banana Pro edit endpoint |
-| Subject and partial mask | `edit_inpaint` | FLUX Fill: `fal-ai/flux-pro/v1/fill` |
+| No subject or references | `generate` | GPT Image 2.5 Sunburst: `openai/gpt-image-2.5/sunburst/text-to-image` |
+| References, no subject | `generate_ref` | Sunburst edit: `openai/gpt-image-2.5/sunburst/edit` |
+| Subject only | `edit_instruct` | Sunburst edit endpoint |
+| Subject and references | `edit_ref_guided` | Sunburst edit endpoint |
+| Subject and partial mask | `edit_inpaint` | Sunburst edit endpoint with an alpha mask |
 
 `edit_composite` remains in domain/schema/database vocabulary, but public mutations and submission reject masks combined with references, and no enabled adapter executes that combination. It should not be removed from historical contracts as unused text.
 
 [Prompt construction](backend/app/services/prompt_builder.py) uses only the current resolved instruction. Edits prepend preservation instructions for unnamed attributes. White bg adds a pure-white instruction to generation and unmasked edits; masked edits omit that global background clause. Turning White bg off makes the edit preamble preserve the background.
 
-Nano Banana uploads Clai-owned input bytes to fal, requests one PNG, maps the largest requested dimension to 1K/2K/4K, forwards seed/aspect ratio, and disables web search. FLUX uploads the subject and a generated mask PNG and disables prompt enhancement. [Fal transport](backend/app/providers/fal_transport.py) performs one queue POST per submission and records its returned request ID; it does not automatically retry a paid POST.
+[GPT Image](backend/app/providers/gpt_image.py) uploads Clai-owned reference bytes and requests one PNG at explicit dimensions with the frozen quality setting. New runs use Sunburst/max, with no automatic model fallback. New images default to 1024×1024. Reference uploads run concurrently while retaining subject/reference order. Explicit dimensions must meet the current endpoint limits (multiples of 16, max edge 3840, aspect ratio at most 3:1, 655,360–8,294,400 pixels); unsupported sizes fail rather than silently downgrade. The image API does not expose a seed, so the frozen seed remains history metadata, not a promise of deterministic image regeneration. Masked edits upload a PNG subject and matching RGBA mask (transparent pixels are editable), followed by the existing deterministic compositing pass.
+
+[Fal transport](backend/app/providers/fal_transport.py) sends one queue POST per submission with no automatic paid retry. Polling is throttled and bounded by `FAL_QUEUE_TIMEOUT_SECONDS` (900 by default); `FAL_TIMEOUT_SECONDS` bounds network requests separately. A timed-out request remains recorded and may still finish remotely; it is not silently replaced or downgraded.
 
 ### Worker commit and failure behavior
 
@@ -197,7 +198,7 @@ For partial masks, [compositing](backend/app/services/masks.py) resizes provider
 
 ## 8. Image history, continuation, deletion, and collapse
 
-New results have one image. Legacy nodes can contain multiple immutable versions and retain a selection-only strip; they cannot generate additional images. Selecting a legacy image changes the active pointer and therefore future reference resolution. A result cannot clear its active image.
+New results have one immutable version containing a hero/front image and four additional stored views. Legacy nodes can contain multiple immutable versions and retain a selection-only strip; they cannot generate additional images. Selecting a legacy image changes the active pointer and therefore future reference resolution. A result cannot clear its active image.
 
 Continue editing uses the branch endpoint to create a new draft and subject edge atomically. It inherits settings and starts with an empty title/prompt by default. It can branch from a retained image whose original card was deleted. Draft duplication copies setup without copying versions or an active image pointer.
 
@@ -205,19 +206,29 @@ Node deletion is physical only when no outgoing dependents or run history requir
 
 [Collapse preview](backend/app/api/versions.py) traverses recorded subject-version IDs, collects original user instructions from frozen jobs, and reverses them into chronological order. It requires at least two plain `edit_instruct` steps, rejects cycles, masked/reference edits, missing instructions, and prompts above 8,000 characters. A narrowly matched legacy prompt envelope supports older runs. The dialog lets the user edit the combined instruction, creates a branch against the root, and submits an ordinary run; it does not rewrite old versions or inject ancestor prompts into other runs.
 
-Image inspection displays original stored assets and supports two-pane comparison. `DownloadButton` fetches the artifact bytes into a Blob, derives a filename/extension, and downloads them without canvas re-encoding. The same control exports completed GLB models. For remotely hosted artifacts, the browser needs the storage host's CORS policy to permit these fetches.
+Image inspection displays original stored assets, provides front/left/back/right selectors for complete view sets, and supports two-pane comparison. `DownloadButton` fetches the artifact bytes into a Blob, derives a filename/extension, and downloads them without canvas re-encoding. The same control exports completed GLB models. For remotely hosted artifacts, the browser needs the storage host's CORS policy to permit these fetches.
 
 ## 9. 3D generation and caching
 
-The [mesh API](backend/app/api/meshes.py) addresses one exact image version. GET returns its cache/job or null. POST accepts an attempt UUID and texture mode, locks the image row, freezes its artifact URL, persists a queued cache record, and then enqueues a mesh task.
+The [mesh API](backend/app/api/meshes.py) addresses one exact image version. GET returns its cache/job or null. POST accepts an attempt UUID, texture mode and the TRELLIS model, locks the image row, freezes its artifact URL, persists a queued cache record, and then enqueues a mesh task.
 
-An existing attempt or nonfailed cache is reused. A completed textureless mesh may be upgraded to `standard`; failed attempts can be explicitly retried with a new attempt ID. Upgrades reuse/reset the cache row, so there is no separate durable history of previous mesh attempts.
+An existing attempt or active job is reused. Completed caches are reused unless `regenerate=true` requests a new attempt, or a textureless mesh is upgraded to `standard`; failed attempts can be explicitly retried with a new attempt ID. Upgrades reuse/reset the cache row, so there is no separate durable history of previous mesh attempts.
 
-[TripoProvider](backend/app/providers/tripo.py) uploads the source image and calls `tripo3d/tripo/v2.5/image-to-3d`. Standard texture requests enable PBR, original-image texture alignment, and image-aligned orientation. The [mesh worker](backend/app/services/mesh_jobs.py) claims only the matching queued attempt, records provider progress, validates/stores output, and updates the cache. Mesh failures leave the 2D version unchanged.
+An image run generates the canonical hero, then submits four independent camera edits with only that exact hero as reference: front-right 45°, rear-right 135°, rear-left 225°, front-left 315°. The category prompt is not included in supporting edits. Preservation instructions retain shape, components, material and graphics, use simple unseen surfaces, and forbid category-associated additions. All five images must finish, with distinct content hashes, before the version commits. Paid supporting request IDs and their hero provenance are recorded immediately.
 
-[GLB validation](backend/app/storage/meshes.py) checks the header/version/declared length and JSON chunk, rejects external buffer/image URLs, and requires a material-linked embedded color texture for textured jobs. It is application-level validation, not a complete glTF conformance checker. Optional preview images are decoded and verified before storage.
+`Version.provider_response_metadata.views` stores the five immutable artifact URLs in front/front_right/rear_right/rear_left/front_left order; `view_jobs` stores endpoint, request ID, payload, source reference and output hashes. The hero is also `Version.artifact_url`. No schema migration or additional workflow state is needed. Old single/four-view images remain viewable but cannot start a new 3D attempt without generating a new five-view image version.
 
-`MeshViewer` polls every two seconds while waiting and dynamically loads the Three.js scene in the browser. OrbitControls allows continuous 360° rotation and top/bottom inspection; Reset view restores the front camera. The source-image panel retains logo selection, placement, size, rotation, and removal controls without explanatory text blocks. Logo crops are projected onto the mesh and retained for the workspace session; GLB export contains the saved mesh only. Completed previews can be shown on the card during the session. Closing the modal stops its polling but leaves worker execution running. The model is an inferred visualization, not editable CAD geometry.
+[TrellisProvider](backend/app/providers/trellis.py) uploads all five stored files unchanged to `fal-ai/trellis-2/multi`. There is no category prompt, negative prompt, vision interpretation, segmentation, contact sheet or synthetic-view filter in this path. Geometry resolution is 1536, texture size 4096, target vertices 500,000, 12 sampling steps per stage and full remesh projection. There is no provider fallback. The mesh API and worker persist `source_views` before submission, and `request_payload.image_urls` records the provider-hosted uploads in the same order. The 3D dialog shows all five originals before generation and links to them at full resolution. See [the five-view audit](docs/five-view-flow.md).
+
+[GLB validation](backend/app/storage/meshes.py) checks the header/version/declared length and JSON chunk, rejects external buffer/image URLs, and requires a material-linked embedded color texture for textured jobs. When Hunyuan returns OBJ/MTL/texture instead, declared assets are downloaded through the same allowlist and converted locally with trimesh and an in-memory resolver. The GLB embeds textures and uses a nonmetallic diffuse material. The validator prefers an explicit `model_urls.glb` over the sometimes misleading `model_glb` field. It is application-level validation, not a complete glTF conformance checker. Optional preview images are decoded and verified before storage; their failures do not discard a valid GLB.
+
+The clean five-view path does not run automatic logo extraction or modify the provider GLB. Existing manual decal controls and saved legacy decals remain available. [mesh_logos.py](backend/app/services/mesh_logos.py) remains an isolated, tested local extraction utility for possible later evaluation; it is not part of reconstruction.
+
+`VersionMesh.provider_response_metadata.logo_preservation` stores the pass status, source URL, normalized crop and subject bounds, stored PNG URL/dimensions, and decal placement/size/rotation. This reuses the existing JSON column without a migration. On the first viewer load, `autoPlaceLogo` fits a fixed orthographic +Z front reference to the normalized model and source subject bounds, raycasts the crop center, and uses the hit normal with the existing `decalOrientation` and `DecalGeometry` helpers. The placement is independent of viewport size and orbit controls, and is saved through `PUT /mesh/logo`. That endpoint checks the project/version and generation attempt, stores manual PNG selections in the existing artifact store, and preserves the rest of the mesh metadata. Removal is persisted explicitly.
+
+`MeshViewer` schedules its next poll two seconds after the preceding request finishes, preventing overlapping responses while waiting and dynamically loads the Three.js scene in the browser. Saved decals display by default after reopening or reloading. OrbitControls allows continuous 360° rotation and top/bottom inspection; Reset view restores the front camera. The source-image panel retains logo selection, placement, size, rotation, and removal controls. Closing the modal stops its polling but leaves worker execution running. The model is an inferred visualization, not editable CAD geometry.
+
+Preservation currently applies to the **viewer only**: GLB downloads and stored preview images remain the provider artifacts (or their locally converted GLB). Decals are separate scene geometry with the original PNG, not baked UV textures. The heuristic assumes one upright product on a plain background with a compact front graphic; it can miss logos or mistake product detail for a graphic. Framing is estimated because TRELLIS supplies no source-camera calibration. Oblique views, curved surfaces, rectangular patch seams, and mismatched geometry can require the existing manual controls. Older mesh records remain usable through manual selection; they are not automatically backfilled.
 
 ## 10. Artifact storage
 
@@ -256,13 +267,14 @@ All project-scoped paths below are relative to `/api/projects/{project_id}`. Bod
 | `POST /nodes/{node_id}/runs` | Freeze and enqueue an image job. |
 | `GET /runs/{job_id}` | Read database-backed job progress. |
 | `GET/POST /versions/{version_id}/mesh` | Read cache / request 3D or a supported texture upgrade. |
+| `PUT /versions/{version_id}/mesh/logo` | Save source crop and decal placement, or explicitly remove it, for the matching mesh attempt. |
 | `GET /health`, `GET /health/ready` | API liveness / database and Redis connectivity (outside project scope). |
 
 The API sanitizes request-validation errors to type/location/message. Mutation conflicts generally return 409, invalid graph inputs 422, missing scoped resources 404, and queue unavailability 503. Full graph serialization enriches nodes with derived runs and branches; individual node responses are simpler, so the client refreshes for authoritative derived state.
 
 ## 12. Configuration and operational boundaries
 
-[Settings](backend/app/core/config.py) load `.env`, ignore extra fields, and cache the settings instance. `DATABASE_URL` is required. `REDIS_URL` selects the Celery broker/result backend. `FAL_KEY` is required for real image generation, SAM, and 3D. `FAL_TIMEOUT_SECONDS`, `FAL_OUTPUT_HOSTS`, artifact settings, and `CORS_ORIGINS` control the integrations. S3 mode requires bucket, access key, and secret key, with optional endpoint/region.
+[Settings](backend/app/core/config.py) load `.env`, ignore extra fields, and cache the settings instance. `DATABASE_URL` is required. `REDIS_URL` selects the Celery broker/result backend. `FAL_KEY` is required for real image generation, SAM, and 3D. `FAL_TIMEOUT_SECONDS`, `FAL_QUEUE_TIMEOUT_SECONDS`, `FAL_OUTPUT_HOSTS`, artifact settings, and `CORS_ORIGINS` control the integrations. S3 mode requires bucket, access key, and secret key, with optional endpoint/region.
 
 [README](README.md) and [Makefile](Makefile) provide local commands. Apply the complete Alembic chain; do not delete old revisions because later revisions depend on them, even when a feature has been retired. The current head, `0f7d4b2a91ce`, drops output measurements and keeps provider/total elapsed values on run jobs.
 

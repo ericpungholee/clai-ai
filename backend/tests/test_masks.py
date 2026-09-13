@@ -8,7 +8,7 @@ from PIL import Image
 
 from app.domain.runs import MaskSnapshot, NodeSnapshot, Op, SubjectEdge, VersionPin
 from app.providers.base import ArtifactBytes, ProviderContractError
-from app.providers.flux_fill import FluxFillProvider
+from app.providers.gpt_image import GptImageProvider
 from app.providers.sam import sam_mask
 from app.services.masks import (
     composite_masked_output,
@@ -44,17 +44,17 @@ def test_fill_uploads_subject_and_mask_and_refuses_misalignment_before_upload() 
             )
         }
     )
-    provider = FluxFillProvider(transport=transport, artifact_reader=reader)
+    provider = GptImageProvider(transport=transport, artifact_reader=reader)
     frozen = request(
         Op.EDIT_INPAINT, subject=subject, mask=MaskSnapshot("1 5", 10, 10, "s")
     )
     prepared = provider.prepare(frozen)
     assert len(transport.uploads) == 2
-    assert prepared.request_payload["image_url"] != subject.artifact_url
+    assert prepared.request_payload["image_urls"][0] != subject.artifact_url
     assert prepared.request_payload["mask_url"] == "https://v3.fal.media/input-2.png"
-    assert prepared.request_payload["seed"] == frozen.seed
-    assert Image.open(BytesIO(transport.uploads[1][0])).getpixel((0, 0)) == 255
-    assert Image.open(BytesIO(transport.uploads[1][0])).getpixel((0, 1)) == 0
+    assert "seed" not in prepared.request_payload
+    assert Image.open(BytesIO(transport.uploads[1][0])).getpixel((0, 0))[3] == 0
+    assert Image.open(BytesIO(transport.uploads[1][0])).getpixel((0, 1))[3] == 255
     with pytest.raises(ProviderContractError, match="dimensions"):
         provider.prepare(
             request(

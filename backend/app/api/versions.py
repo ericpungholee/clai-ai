@@ -44,7 +44,7 @@ def project_version(
 def preview_collapse(
     project_id: uuid.UUID, version_id: uuid.UUID, db: Session = Depends(get_db)
 ) -> CollapseReady | CollapseUnavailable:
-    get_project_or_404(project_id, db)
+    get_project_or_404(project_id, db, lock=False)
     current = project_version(project_id, version_id, db)
     instructions: list[str] = []
     visited: set[uuid.UUID] = set()

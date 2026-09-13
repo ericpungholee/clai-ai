@@ -1,5 +1,6 @@
 import { randomInt } from "node:crypto";
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import type { GraphDocument, RunJob } from "../lib/graph.ts";
 import type { MeshData } from "../lib/meshes.ts";
 
@@ -39,6 +40,10 @@ function previewForGraph(graph: GraphDocument, nodeId: string) {
   return { op };
 }
 
+function imageViews(front: string) {
+  return { front, front_right: `${front}?view=front_right`, rear_right: `${front}?view=rear_right`, rear_left: `${front}?view=rear_left`, front_left: `${front}?view=front_left` };
+}
+
 function fixture(): GraphDocument {
   const settings = {
     aspect_ratio: "1:1",
@@ -51,6 +56,7 @@ function fixture(): GraphDocument {
     node_id: "source",
     created_at: project.created_at,
     artifact_url: "http://127.0.0.1:8109/artifacts/subject.svg",
+    views: imageViews("http://127.0.0.1:8109/artifacts/subject.svg"),
     op: "generate" as const,
     provider: "fake",
     model: "fake",
@@ -115,6 +121,8 @@ function fixture(): GraphDocument {
 
 let graph = fixture();
 const meshes = new Map<string, MeshData>();
+let automaticLogo = false;
+const logoFixture = JSON.parse(readFileSync(new URL("./fixtures/logo-preservation.json", import.meta.url), "utf8"));
 const runs = new Map<string, { job: RunJob; prompt: string; seed: number }>();
 let projectDeleted = false;
 
@@ -208,6 +216,7 @@ createServer(async (request, response) => {
   if (path === "/reset") {
     graph = fixture();
     meshes.clear();
+    automaticLogo = false;
     runs.clear();
     projectDeleted = false;
     project.name = "Mask test";
@@ -230,6 +239,7 @@ createServer(async (request, response) => {
         ...fixture().nodes[0].versions[0],
         id: `result-${entry.job.id}`,
         artifact_url: `http://127.0.0.1:8109/artifacts/result-${entry.job.id}.svg`,
+        views: imageViews(`http://127.0.0.1:8109/artifacts/result-${entry.job.id}.svg`),
         node_id: node.id,
         prompt_at_runtime: entry.prompt,
         seed: entry.seed,
@@ -451,6 +461,31 @@ createServer(async (request, response) => {
     response.writeHead(204).end();
     return;
   }
+  if (path === "/logo-fixture") {
+    automaticLogo = true;
+    graph.nodes[0].versions[0].artifact_url = logoFixture.decal.source.url;
+    response.end("{}");
+    return;
+  }
+  if (path === "/artifacts/logo-bear.png" || path === "/artifacts/logo-crop.png") {
+    response.setHeader("Content-Type", "image/png");
+    response.end(readFileSync(new URL(
+      path.endsWith("logo-bear.png") ? "../../backend/tests/fixtures/logo-bear.png" : "./fixtures/logo-crop.png",
+      import.meta.url,
+    )));
+    return;
+  }
+  if (path.endsWith("/mesh/logo") && request.method === "PUT") {
+    const versionId = path.split("/versions/")[1].split("/")[0];
+    const mesh = meshes.get(versionId)!;
+    if (mesh.attempt_id !== body.attempt_id) {
+      response.writeHead(409).end(JSON.stringify({ detail: "Stale mesh attempt" }));
+      return;
+    }
+    mesh.logo_preservation = { status: body.decal ? "ready" : "removed", decal: body.decal };
+    response.end(JSON.stringify(mesh.logo_preservation));
+    return;
+  }
   if (path === "/artifacts/mesh.glb" || path === "/artifacts/grey-mesh.glb") {
     response.setHeader("Content-Type", "model/gltf-binary");
     response.end(meshFixture(path === "/artifacts/mesh.glb"));
@@ -464,8 +499,7 @@ createServer(async (request, response) => {
       request.method === "POST" &&
       (!cached ||
         (cached.status === "complete" &&
-          cached.texture === "no" &&
-          texture === "standard" &&
+          ((cached.texture === "no" && texture === "standard") || body.regenerate === true) &&
           cached.attempt_id !== body.attempt_id))
     )
       meshes.set(versionId, {
@@ -476,6 +510,7 @@ createServer(async (request, response) => {
         artifact_url: `http://127.0.0.1:8109/artifacts/${texture === "no" ? "grey-mesh" : "mesh"}.glb`,
         preview_url: "http://127.0.0.1:8109/artifacts/subject.svg",
         elapsed_seconds: 42,
+        logo_preservation: automaticLogo ? structuredClone(logoFixture) : { status: "not_found", decal: null },
         error: null,
       });
     response.end(JSON.stringify(meshes.get(versionId) ?? null));

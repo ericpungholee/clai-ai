@@ -1,15 +1,24 @@
+import base64
+import binascii
 import uuid
+from io import BytesIO
 from typing import Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from PIL import Image, UnidentifiedImageError
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.graph import get_project_or_404
+from app.core.config import settings
 from app.core.database import get_db
+from app.domain.image_views import mesh_view_urls
 from app.models.graph import GraphNode, Version, VersionMesh
-from app.providers.trellis import TRELLIS_ENDPOINT
+from app.providers.trellis import TRELLIS_MULTI_ENDPOINT
+from app.schemas.mesh_logo import LogoPreservation, MeshDecal
+from app.storage.artifacts import ArtifactStore
+from app.storage.factory import create_artifact_store
 
 router = APIRouter(
     prefix="/api/projects/{project_id}/versions/{version_id}/mesh", tags=["mesh"]
@@ -19,6 +28,8 @@ router = APIRouter(
 class MeshCreate(BaseModel):
     attempt_id: uuid.UUID
     texture: Literal["no", "standard"] = "standard"
+    regenerate: bool = False
+    model: Literal["trellis"] = "trellis"
 
 
 class MeshData(BaseModel):
@@ -32,6 +43,18 @@ class MeshData(BaseModel):
     preview_url: str | None
     error: str | None
     elapsed_seconds: float | None
+    model: str
+    logo_preservation: LogoPreservation | None = None
+    source_views: dict[str, str] = Field(default_factory=dict)
+
+
+class LogoUpdate(BaseModel):
+    attempt_id: uuid.UUID
+    decal: MeshDecal | None
+
+
+def get_logo_store() -> ArtifactStore:
+    return create_artifact_store(settings)
 
 
 class MeshEnqueuer(Protocol):
@@ -50,7 +73,12 @@ def get_mesh_enqueuer() -> MeshEnqueuer:
 
 
 def mesh_data(mesh: VersionMesh) -> MeshData:
-    return MeshData.model_validate(mesh, from_attributes=True)
+    data = MeshData.model_validate(mesh, from_attributes=True)
+    data.source_views = mesh.provider_response_metadata.get("source_views", {})
+    logo = mesh.provider_response_metadata.get("logo_preservation")
+    if logo is not None:
+        data.logo_preservation = LogoPreservation.model_validate(logo)
+    return data
 
 
 def source_image(project_id: uuid.UUID, version_id: uuid.UUID, db: Session) -> str:
@@ -68,7 +96,7 @@ def source_image(project_id: uuid.UUID, version_id: uuid.UUID, db: Session) -> s
 def get_mesh(
     project_id: uuid.UUID, version_id: uuid.UUID, db: Session = Depends(get_db)
 ) -> MeshData | None:
-    get_project_or_404(project_id, db)
+    get_project_or_404(project_id, db, lock=False)
     source_image(project_id, version_id, db)
     mesh = db.get(VersionMesh, version_id)
     return mesh_data(mesh) if mesh else None
@@ -93,17 +121,25 @@ def create_mesh(
             and mesh.texture == "no"
             and data.texture == "standard"
         )
+        regenerate = mesh.status == "complete" and data.regenerate
         if mesh.attempt_id == data.attempt_id or (
-            mesh.status != "failed" and not upgrade_texture
+            mesh.status != "failed" and not upgrade_texture and not regenerate
         ):
             return mesh_data(mesh)
+    version = db.get(Version, version_id)
+    try:
+        views = mesh_view_urls(
+            front_url=source_url, metadata=version.provider_response_metadata
+        )
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
     if mesh is None:
         mesh = VersionMesh(
-            version_id=version_id, provider="fal", model=TRELLIS_ENDPOINT
+            version_id=version_id, provider="fal", model=TRELLIS_MULTI_ENDPOINT
         )
         db.add(mesh)
     mesh.provider = "fal"
-    mesh.model = TRELLIS_ENDPOINT
+    mesh.model = TRELLIS_MULTI_ENDPOINT
     mesh.attempt_id = data.attempt_id
     mesh.texture = data.texture
     mesh.status = "queued"
@@ -114,7 +150,10 @@ def create_mesh(
     mesh.elapsed_seconds = None
     mesh.started_at = None
     mesh.provider_request_id = None
-    mesh.provider_response_metadata = {}
+    mesh.provider_response_metadata = {
+        "source_views": views,
+        "input_policy": "stored_five_views",
+    }
     mesh.request_payload = {}
     db.commit()
     try:
@@ -132,3 +171,66 @@ def create_mesh(
         db.commit()
         raise HTTPException(503, mesh.error) from error
     return mesh_data(mesh)
+
+
+@router.put("/logo", response_model=LogoPreservation)
+def update_logo(
+    project_id: uuid.UUID,
+    version_id: uuid.UUID,
+    data: LogoUpdate,
+    db: Session = Depends(get_db),
+    store: ArtifactStore = Depends(get_logo_store),
+) -> LogoPreservation:
+    get_project_or_404(project_id, db)
+    source_url = source_image(project_id, version_id, db)
+    mesh = db.scalar(
+        select(VersionMesh)
+        .where(VersionMesh.version_id == version_id)
+        .with_for_update()
+    )
+    if mesh is None:
+        raise HTTPException(404, "Mesh not found")
+    if mesh.status != "complete" or mesh.attempt_id != data.attempt_id:
+        raise HTTPException(409, "This mesh generation has changed. Reopen the viewer.")
+    decal = data.decal
+    if decal is not None:
+        if decal.source.url != (mesh.source_artifact_url or source_url):
+            raise HTTPException(422, "The logo must use this mesh's original image")
+        current = mesh_data(mesh).logo_preservation
+        previous_crop = current.decal.crop if current and current.decal else None
+        if decal.crop.dataUrl.startswith("data:image/png;base64,"):
+            try:
+                content = base64.b64decode(
+                    decal.crop.dataUrl.split(",", 1)[1], validate=True
+                )
+                with Image.open(BytesIO(content)) as png:
+                    if png.format != "PNG" or png.size != (
+                        decal.crop.width,
+                        decal.crop.height,
+                    ):
+                        raise ValueError("Invalid crop dimensions")
+                    png.verify()
+            except (
+                ValueError,
+                binascii.Error,
+                OSError,
+                UnidentifiedImageError,
+            ) as error:
+                raise HTTPException(422, "Invalid logo PNG") from error
+            stored = store.put(
+                key=f"meshes/{mesh.attempt_id}/logo.png",
+                content=content,
+                content_type="image/png",
+            )
+            decal.crop.dataUrl = stored.artifact_url
+        elif previous_crop is None or decal.crop != previous_crop:
+            # Never fetch a client-supplied URL or persist expiring external crops.
+            raise HTTPException(422, "Use the saved crop or upload a PNG selection")
+    logo = LogoPreservation(status="ready" if decal else "removed", decal=decal)
+    # Assign a new object: the existing JSON column is not a MutableDict.
+    mesh.provider_response_metadata = {
+        **mesh.provider_response_metadata,
+        "logo_preservation": logo.model_dump(mode="json"),
+    }
+    db.commit()
+    return logo

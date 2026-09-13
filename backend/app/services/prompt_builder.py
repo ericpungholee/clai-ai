@@ -41,7 +41,6 @@ def build_prompt(*, user_prompt: str, op: Op, white_background: bool = True) -> 
             return f"{prompt}\n\nThe background must be plain pure white."
         return prompt
     if op in GENERATE_OPS:
-        # Vril's studio prompt, with the existing background preference preserved.
         background = (
             "Photograph the product on a pure white background with "
             if white_background
@@ -56,6 +55,9 @@ def build_prompt(*, user_prompt: str, op: Op, white_background: bool = True) -> 
             "the entire product is visible - nothing should be cropped or cut off. "
             "The design should be consistent and suitable for viewing from "
             "multiple camera angles. Avoid any text overlays, watermarks, "
-            "or distracting elements."
+            "or distracting elements. Product graphics, printed text and logos are "
+            "part of the design and must remain legible. Show only the requested "
+            "object and components: do not assemble accessories or category-associated "
+            "parts. Missing components are intentional; do not complete an assembly."
         )
     return resolved_prompt

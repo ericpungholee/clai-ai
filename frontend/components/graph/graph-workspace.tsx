@@ -310,15 +310,24 @@ export function GraphWorkspace({
   }, [projectId, replaceWorkspace]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible")
-        void refreshWorkspace().catch(() =>
-          setConnectionError(
-            "Network interrupted. Your local draft is still here; checking again…",
-          ),
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        if (document.visibilityState === "visible") await refreshWorkspace();
+      } catch {
+        if (alive) setConnectionError(
+          "Network interrupted. Your local draft is still here; checking again…",
         );
-    }, 3000);
-    return () => clearInterval(timer);
+      } finally {
+        if (alive) timer = setTimeout(poll, 3000);
+      }
+    };
+    timer = setTimeout(poll, 3000);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
   }, [refreshWorkspace]);
 
   useEffect(() => {
@@ -1003,6 +1012,13 @@ export function GraphWorkspace({
   const actions = useMemo(
     () => ({
       updateTitle,
+      updateSettings: (nodeId: string, patch: Partial<WorkspaceNode["data"]["settings"]>) => {
+        const node = nodesRef.current.find((item) => item.id === nodeId);
+        if (!node || node.data.versions.length || node.data.run.status === "running") return;
+        const settings = { ...node.data.settings, ...patch };
+        updateNodeData(nodeId, { settings });
+        scheduleNodePatch(nodeId, { settings });
+      },
       selectVersion,
       branchVersion,
       runNode,
@@ -1061,6 +1077,7 @@ export function GraphWorkspace({
       selectVersion,
       updateTitle,
       updateDocument,
+      scheduleNodePatch,
       projectId,
       updateNodeData,
       duplicateNode,

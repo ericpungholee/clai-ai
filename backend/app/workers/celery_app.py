@@ -9,7 +9,12 @@ from app.core.database import SessionLocal
 from app.models.graph import RunJob, VersionMesh
 from app.providers.factory import FalImageProvider
 from app.providers.fal_transport import FalSdkTransport
-from app.providers.trellis import TrellisProvider
+from app.providers.hunyuan import HUNYUAN_ENDPOINT, HunyuanProvider
+from app.providers.trellis import (
+    TRELLIS_ENDPOINT,
+    TRELLIS_MULTI_ENDPOINT,
+    TrellisProvider,
+)
 from app.services.mesh_jobs import execute_mesh_job
 from app.services.run_execution import execute_run_job
 from app.storage.artifacts import HttpArtifactReader
@@ -32,6 +37,8 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     broker_connection_retry_on_startup=True,
+    worker_prefetch_multiplier=1,
+    task_ignore_result=True,
 )
 
 
@@ -70,10 +77,23 @@ def mesh_job(version_id: str, attempt_id: str) -> None:
     try:
         if settings.fal_api_key is None:
             raise ValueError("FAL_KEY is required")
-        provider = TrellisProvider(
+        with SessionLocal() as db:
+            mesh = db.get(VersionMesh, uuid.UUID(version_id))
+            if mesh is None or mesh.attempt_id != uuid.UUID(attempt_id):
+                return
+            model = mesh.model
+        provider_type = {
+            HUNYUAN_ENDPOINT: HunyuanProvider,
+            TRELLIS_ENDPOINT: TrellisProvider,
+            TRELLIS_MULTI_ENDPOINT: TrellisProvider,
+        }.get(model)
+        if provider_type is None:
+            raise ValueError("Unsupported frozen mesh model")
+        provider = provider_type(
             FalSdkTransport(
                 settings.fal_api_key,
                 timeout_seconds=settings.fal_timeout_seconds,
+                queue_timeout_seconds=settings.fal_queue_timeout_seconds,
             ),
             create_artifact_reader(settings),
         )

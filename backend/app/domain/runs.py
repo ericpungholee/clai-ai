@@ -70,12 +70,19 @@ class NodeSettings:
     width: int = 1024
     height: int = 1024
     white_background: bool = True
+    image_model: Literal["flare", "sunburst"] = "sunburst"
+    image_quality: Literal["high", "max"] = "max"
+    generate_views: bool = True
 
     def __post_init__(self) -> None:
         if not self.aspect_ratio.strip():
             raise ValueError("Aspect ratio cannot be empty")
         if self.width <= 0 or self.height <= 0:
             raise ValueError("Resolution must be positive")
+        if self.image_model not in {"flare", "sunburst"}:
+            raise ValueError("Unsupported image model")
+        if self.image_quality not in {"high", "max"}:
+            raise ValueError("Unsupported image quality")
 
 
 @dataclass(frozen=True)

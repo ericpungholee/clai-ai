@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.domain.image_views import view_urls
 from app.domain.prompts import document_text, text_document
 from app.models.graph import (
     GraphEdge,
@@ -405,11 +406,18 @@ def serialize_node(node: GraphNode, versions: list[Version]) -> GraphNodeData:
 
 
 def serialize_version(version: Version) -> VersionData:
+    try:
+        views = view_urls(
+            front_url=version.artifact_url, metadata=version.provider_response_metadata
+        )
+    except ValueError:
+        views = {}
     return VersionData(
         id=version.id,
         node_id=version.node_id,
         created_at=version.created_at,
         artifact_url=version.artifact_url,
+        views=views,
         op=version.op,
         provider=version.provider,
         model=version.model,
@@ -476,4 +484,5 @@ def _validate_active_version(
 def _serialize_settings(settings: dict[str, object]) -> NodeSettingsData:
     payload = dict(settings)
     payload.setdefault("whiteBackground", True)
+    payload.update(image_model="sunburst", image_quality="max", generate_views=True)
     return NodeSettingsData.model_validate(payload)

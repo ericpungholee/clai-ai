@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { selectMask, type Version } from "@/lib/graph";
-import { cropLogo, readLogoSource, type MeshDecal } from "@/lib/mesh-decals";
+import {
+  cropLogo, decodeLogoMask, readLogoSource, type MeshDecal,
+} from "@/lib/mesh-decals";
 
 export function MeshLogoEditor({
   projectId,
@@ -76,7 +78,23 @@ export function MeshLogoEditor({
       if (mask.subject_version_id !== version.id)
         throw new Error("The selection belongs to another image. Try again.");
       const crop = cropLogo(source, mask);
-      onChange({ crop, placement: null, size: 0.25, rotation: 0 });
+      const bounds = decodeLogoMask(mask);
+      onChange({
+        crop,
+        placement: null,
+        size: 0.25,
+        rotation: 0,
+        source: {
+          url: version.artifact_url,
+          mode: "manual",
+          bounds: {
+            x: bounds.left / source.width,
+            y: bounds.top / source.height,
+            width: bounds.width / source.width,
+            height: bounds.height / source.height,
+          },
+        },
+      });
       onPlacing(true);
     } catch (error) {
       if (alive.current)

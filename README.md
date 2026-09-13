@@ -14,7 +14,7 @@ Clai is a visual workspace for developing physical product concepts with generat
 - Preserves pixels outside masked edits with deterministic compositing.
 - Branches from any saved image without changing the original result.
 - Stores provider outputs locally or in S3-compatible object storage.
-- Creates, previews, and exports textured 3D meshes.
+- Generates textured 3D meshes from five saved views of one object, each supporting view referenced directly to its hero.
 - Persists durable run state through PostgreSQL, Redis, and Celery.
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black) ![FastAPI](https://img.shields.io/badge/FastAPI-Python_3.12-009688) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1)
@@ -58,6 +58,8 @@ flowchart LR
 
 Submitting a run resolves its exact subject, references, mask, prompt, settings, and seed into a frozen database record. The worker executes that snapshot even if another browser tab changes the draft later. A successful run creates one immutable version; continuing an edit creates a new node linked to that version.
 
+New drafts use GPT Image 2.5 Sunburst at maximum quality and 1024×1024. Each image version contains the hero plus four overlapping camera views generated directly from that hero. Open **Inspect result** or **3D → Images used for 3D** to inspect all five originals. 3D sends those exact five images to TRELLIS.2 multi-image at 1536 geometry / 4096 texture resolution. Older images need a newly generated five-view version before reconstruction. **Regenerate 3D** replaces a cached result on request. See [the five-view audit](docs/five-view-flow.md) for endpoint verification and quality limits.
+
 Provider files are validated and copied into Clai-owned storage before the result is committed. The default filesystem backend works without cloud infrastructure. S3-compatible storage is available through the variables documented in [.env.example](.env.example).
 
 See [architecture.md](architecture.md) for the data model, provider routing, concurrency rules, storage boundaries, and known operational limits.
@@ -82,6 +84,12 @@ cd ../frontend && npm ci && npm run lint && npm run typecheck && npm test
 ```
 
 Browser tests use a local fake API and never call paid providers. The backend suite uses deterministic provider and storage doubles, with a separate PostgreSQL profile for database-specific behavior.
+
+## Troubleshooting
+
+A hydration warning mentioning only `data-cursor-ref` points to inspection tooling modifying the page before React starts. Clai does not render these attributes. Disable the browser inspector/extension or open the app in a clean browser profile, then reload. The browser regressions cover clean hydration and reproduce the warning with injected annotations. See [Next.js hydration guidance](https://nextjs.org/docs/messages/react-hydration-error).
+
+For fal 403 errors, Clai now distinguishes the provider's explicit exhausted-balance response from other access denials during upload, submission, polling and result retrieval. Check billing and permissions for the account associated with `FAL_KEY`; a generic 403 alone does not establish that credits are exhausted. If fal reports exhausted balance while that account has credits, contact support@fal.ai to check its billing status and clear any account lock. If you change `.env`, recreate the affected Docker services to load the new environment (`docker compose up -d --force-recreate backend worker`) after current jobs finish. A plain container restart does not reload `.env`. Already failed jobs keep their recorded error; the improved messages apply to subsequent failures. Clai does not automatically resubmit paid requests.
 
 ## Repository layout
 

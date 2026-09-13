@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { MeshDecal, DecalPlacement } from "@/lib/mesh-decals";
 import type { MeshScene } from "@/lib/mesh-scene";
 import { MeshLogoEditor } from "./mesh-logo-editor";
 import { DownloadButton } from "./download-button";
 import { Skeleton } from "./skeleton";
-import type { Version } from "@/lib/graph";
-import { requestMesh, type MeshData } from "@/lib/meshes";
+import { IMAGE_VIEWS, type Version } from "@/lib/graph";
+import { requestMesh, saveMeshLogo, type MeshData } from "@/lib/meshes";
 
 type LoadState =
   | { status: "loading" | "submitting" }
@@ -40,7 +40,9 @@ export function MeshViewer({
     let alive = true;
     requestMesh(projectId, version.id)
       .then((mesh) => {
-        if (alive) setState({ status: "ready", mesh });
+        if (alive) {
+          setState({ status: "ready", mesh });
+        }
       })
       .catch((error) => {
         if (alive) setState({ status: "error", message: error.message });
@@ -55,25 +57,30 @@ export function MeshViewer({
   useEffect(() => {
     if (!waiting) return;
     let alive = true;
-    const timer = setInterval(() => {
-      requestMesh(projectId, version.id)
-        .then((mesh) => {
-          if (alive) setState({ status: "ready", mesh });
-        })
-        .catch(() => {
-          /* Keep polling the existing job, never submit another on a network error. */
-        });
-    }, 2000);
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      let finished = false;
+      try {
+        const latest = await requestMesh(projectId, version.id);
+        finished = latest?.status === "complete" || latest?.status === "failed";
+        if (alive) setState({ status: "ready", mesh: latest });
+      } catch {
+        /* Retry the existing job after transient network failures. */
+      } finally {
+        if (alive && !finished) timer = setTimeout(poll, 2000);
+      }
+    };
+    timer = setTimeout(poll, 2000);
     return () => {
       alive = false;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [projectId, version.id, waiting]);
   useEffect(() => {
     if (mesh?.status === "complete" && mesh.preview_url)
       previewCallback.current(version.id, mesh.preview_url);
   }, [mesh, version.id]);
-  const create = async () => {
+  const create = async (regenerate = false) => {
     if (state.status === "submitting") return;
     setState({ status: "submitting" });
     try {
@@ -82,6 +89,8 @@ export function MeshViewer({
         mesh: await requestMesh(projectId, version.id, {
           texture: "standard",
           attempt_id: crypto.randomUUID(),
+          regenerate,
+          model: "trellis",
         }),
       });
     } catch (error) {
@@ -104,6 +113,11 @@ export function MeshViewer({
         <h2 className="font-semibold">3D view</h2>
         <div className="flex items-center gap-2">
           {mesh?.status === "complete" ? (
+            <button onClick={() => void create(true)}>Regenerate 3D</button>
+          ) : null}
+          {mesh?.status === "complete" ? (
+            // Downloads the stored TRELLIS GLB. Viewer decals are separate geometry;
+            // including them in this artifact requires a future export/baking pass.
             <DownloadButton
               url={mesh.artifact_url}
               name={`clai-${version.id}`}
@@ -114,6 +128,26 @@ export function MeshViewer({
           <button onClick={onClose}>Close</button>
         </div>
       </header>
+      <details className="mt-3 text-xs" open={mesh === null || mesh.status !== "complete"}>
+        <summary className="cursor-pointer">Images used for 3D</summary>
+        <div className="mt-2 grid grid-cols-5 gap-2">
+          {IMAGE_VIEWS.map(([angle, title]) => {
+            const url = mesh?.source_views?.[angle] ?? version.views?.[angle];
+            return (
+              <a key={angle} href={url} target="_blank" rel="noreferrer" className="text-center">
+                {url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={url} alt={title} className="h-24 w-full rounded border object-contain" />
+                ) : <span className="block p-4">Missing view</span>}
+                {title}
+              </a>
+            );
+          })}
+        </div>
+        {IMAGE_VIEWS.some(([angle]) => !version.views?.[angle]) && (
+          <p>Generate a new image to create the five views required for 3D.</p>
+        )}
+      </details>
       <main className="relative mt-4 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-lg bg-white">
         {mesh?.status === "complete" ? (
           <DecalView
@@ -121,7 +155,11 @@ export function MeshViewer({
             mesh={mesh}
             version={version}
             projectId={projectId}
-            decal={decals[mesh.attempt_id] ?? null}
+            decal={
+              Object.hasOwn(decals, mesh.attempt_id)
+                ? decals[mesh.attempt_id]
+                : mesh.logo_preservation?.decal ?? null
+            }
             onChange={(decal) => onDecalChange(mesh.attempt_id, decal)}
           />
         ) : waiting ||
@@ -167,7 +205,7 @@ export function MeshViewer({
                 </p>
               ) : null}
               <button
-                onClick={create}
+                onClick={() => void create()}
                 className="mt-4 rounded bg-neutral-900 px-4 py-2 text-sm font-bold text-white"
               >
                 {mesh?.status === "failed" ? "Retry" : "Generate"} 3D
@@ -183,7 +221,7 @@ export function MeshViewer({
             above, or optionally generate colors and print.
           </p>
           <button
-            onClick={create}
+            onClick={() => void create()}
             className="shrink-0 rounded bg-neutral-900 px-4 py-2 text-white"
           >
             Generate with colors & print
@@ -199,7 +237,7 @@ function DecalView({
   version,
   projectId,
   decal,
-  onChange,
+  onChange: onDecalChange,
 }: {
   mesh: MeshData & { status: "complete" };
   version: Version;
@@ -211,7 +249,40 @@ function DecalView({
   const scene = useRef<MeshScene | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [placing, setPlacing] = useState(!!decal && !decal.placement);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const saveQueue = useRef(Promise.resolve());
+  const revision = useRef(0);
+  const [placing, setPlacing] = useState(
+    !!decal && !decal.placement && decal.source.mode === "manual",
+  );
+  const onChange = useCallback(
+    (next: MeshDecal | null) => {
+      onDecalChange(next);
+      const update = ++revision.current;
+      setSaving(true);
+      setSaveError(null);
+      // Serialize and coalesce slider changes so a slow response cannot restore an
+      // older placement. Already queued saves continue when this dialog closes.
+      saveQueue.current = saveQueue.current.then(async () => {
+        if (update !== revision.current) return;
+        try {
+          const saved = await saveMeshLogo(
+            projectId, version.id, mesh.attempt_id, next,
+          );
+          if (update === revision.current) onDecalChange(saved.decal);
+        } catch (error) {
+          if (update === revision.current)
+            setSaveError(
+              error instanceof Error ? error.message : "The logo could not be saved.",
+            );
+        } finally {
+          if (update === revision.current) setSaving(false);
+        }
+      });
+    },
+    [mesh.attempt_id, onDecalChange, projectId, version.id],
+  );
   const current = useRef({ decal, placing, onChange });
   useEffect(() => {
     current.current = { decal, placing, onChange };
@@ -239,6 +310,9 @@ function DecalView({
             current.current.onChange({ ...current.current.decal, placement });
             setPlacing(false);
             setError(null);
+          },
+          autoPlaced: (placed) => {
+            if (alive) current.current.onChange(placed);
           },
         });
         scene.current.setDecal(current.current.decal);
@@ -281,12 +355,17 @@ function DecalView({
             Loading 3D viewer…
           </p>
         ) : null}
-        {error ? (
+        {error || saveError ? (
           <p
             role="alert"
             className="absolute bottom-3 left-3 right-3 z-10 rounded bg-white p-3 text-sm text-red-700"
           >
-            {error}
+            {error || saveError}
+          </p>
+        ) : null}
+        {saving ? (
+          <p role="status" className="absolute bottom-3 left-3 z-10 rounded bg-white px-2 py-1 text-xs">
+            Saving logo…
           </p>
         ) : null}
         <button

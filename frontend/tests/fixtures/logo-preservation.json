@@ -1,0 +1,29 @@
+{
+  "status": "ready",
+  "decal": {
+    "source": {
+      "url": "http://127.0.0.1:8109/artifacts/logo-bear.png",
+      "bounds": {
+        "x": 0.396484375,
+        "y": 0.4859375,
+        "width": 0.20703125,
+        "height": 0.146875
+      },
+      "subjectBounds": {
+        "x": 0.1758957654723127,
+        "y": 0.109375,
+        "width": 0.6482084690553745,
+        "height": 0.8098958333333334
+      },
+      "mode": "auto"
+    },
+    "crop": {
+      "dataUrl": "http://127.0.0.1:8109/artifacts/logo-crop.png",
+      "width": 106,
+      "height": 94
+    },
+    "placement": null,
+    "size": 0.25,
+    "rotation": 0
+  }
+}
