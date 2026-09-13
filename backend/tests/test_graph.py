@@ -175,7 +175,11 @@ def test_white_background_defaults_for_new_nodes_and_freezes_per_version(
         client, project_id, str(node["id"]), enqueuer, provider
     )
     assert provider.requests[-1].settings.white_background is False
-    assert provider.requests[-1].prompt_at_runtime == "A sculptural desk lamp"
+    assert provider.requests[-1].prompt_at_runtime.startswith(
+        "A sculptural desk lamp\n\n"
+    )
+    assert "exactly one instance" in provider.requests[-1].prompt_at_runtime
+    assert "plain pure white" not in provider.requests[-1].prompt_at_runtime
 
     graph = client.get(f"/api/projects/{project_id}/graph").json()
     versions = {

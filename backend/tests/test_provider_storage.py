@@ -23,7 +23,7 @@ from app.providers.base import (
     ProviderJob,
     ProviderResult,
 )
-from app.providers.fal_transport import FalSdkTransport
+from app.providers.fal_transport import FalAccountError, FalSdkTransport
 from app.providers.nano_banana import NanoBananaProProvider
 from app.services.run_freezing import freeze_run_request
 from app.storage.artifacts import (
@@ -85,6 +85,25 @@ class FakeFalClient:
 
     def result(self, application: str, request_id: str) -> object:
         return {"application": application, "request_id": request_id}
+
+
+class FakeFalHandle:
+    def __init__(self) -> None:
+        self.intervals: list[float] = []
+
+    def get(self, *, interval: float) -> object:
+        self.intervals.append(interval)
+        return {"model_glb": {"url": "https://provider.test/model.glb"}}
+
+
+class FakeHandleFalClient(FakeFalClient):
+    def __init__(self) -> None:
+        self.applications: list[tuple[str, str]] = []
+        self.handle = FakeFalHandle()
+
+    def get_handle(self, application: str, request_id: str) -> FakeFalHandle:
+        self.applications.append((application, request_id))
+        return self.handle
 
 
 class FakeS3Client:
@@ -224,6 +243,21 @@ def test_sdk_transport_submits_paid_request_exactly_once() -> None:
     assert calls == 1
 
 
+def test_sdk_transport_throttles_queue_result_polling() -> None:
+    client = FakeHandleFalClient()
+    transport = FalSdkTransport(
+        "fixture-key",
+        client=client,
+        queue_poll_interval_seconds=1.5,
+    )
+
+    result = transport.result(endpoint="fal-ai/trellis-2/multi", request_id="request-1")
+
+    assert result["model_glb"] == {"url": "https://provider.test/model.glb"}
+    assert client.applications == [("fal-ai/trellis-2/multi", "request-1")]
+    assert client.handle.intervals == [1.5]
+
+
 def test_sdk_transport_does_not_retry_failed_paid_submission() -> None:
     calls = 0
 
@@ -246,6 +280,43 @@ def test_sdk_transport_does_not_retry_failed_paid_submission() -> None:
         )
 
     assert calls == 1
+
+
+@pytest.mark.parametrize("operation", ["upload", "submit"])
+@pytest.mark.parametrize(
+    "detail", ["User is locked. Reason: Exhausted balance.", "Forbidden"]
+)
+def test_sdk_transport_explains_exhausted_balance_without_retry(operation, detail):
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(403, json={"detail": detail}, request=request)
+
+    class RejectedUploadClient(FakeFalClient):
+        def upload_file(self, path):
+            respond(
+                httpx.Request("POST", "https://rest.fal.ai/storage/auth/token")
+            ).raise_for_status()
+
+    transport = FalSdkTransport(
+        "fixture-key",
+        client=RejectedUploadClient(),
+        queue_client=httpx.Client(transport=httpx.MockTransport(respond)),
+    )
+    expected_error = (
+        FalAccountError if "Exhausted balance" in detail else httpx.HTTPStatusError
+    )
+    with pytest.raises(expected_error) as caught:
+        if operation == "upload":
+            transport.upload(content=b"fixture", filename="fixture.png")
+        else:
+            transport.submit(endpoint="fal-ai/model", payload={"prompt": "fixture"})
+    assert len(calls) == 1
+    assert "fixture-key" not in str(caught.value)
+    if expected_error is FalAccountError:
+        assert "https://fal.ai/dashboard/billing" in str(caught.value)
+        assert "then retry" in str(caught.value)
 
 
 def test_edit_uploads_clai_bytes_and_preserves_subject_then_connect_order() -> None:
@@ -284,6 +355,39 @@ def test_generate_ref_uses_edit_endpoint_with_connect_images() -> None:
 
     assert job.endpoint == "fal-ai/nano-banana-pro/edit"
     assert job.request_payload["image_urls"] == ["https://v3.fal.media/input-1.png"]
+
+
+@pytest.mark.parametrize("angle", ["right", "back", "left"])
+def test_angle_view_uses_edit_endpoint_with_the_source_image_only(angle) -> None:
+    source = version("primary")
+    provider, transport, reader = provider_for((source,))
+
+    job = provider.execute_angle_view(
+        angle=angle,
+        source_url=source.artifact_url,
+        aspect_ratio="1:1",
+        resolution="1K",
+        seed=42,
+        white_background=True,
+        design_prompt="A blue deck with no exposed wood",
+    )
+
+    assert job.endpoint == "fal-ai/nano-banana-pro/edit"
+    assert reader.read_urls == [source.artifact_url]
+    assert job.request_payload["image_urls"] == ["https://v3.fal.media/input-1.png"]
+    assert {
+        "right": "right-side three-quarter view",
+        "back": "opposite/rear side",
+        "left": "left-side three-quarter view",
+    }[angle] in job.request_payload["prompt"]
+    assert job.request_payload["num_images"] == 1
+    assert "exactly one object" in job.request_payload["prompt"]
+    assert "same camera angle" not in job.request_payload["prompt"]
+    assert "A blue deck with no exposed wood" in job.request_payload["prompt"]
+    assert job.request_payload["prompt"].endswith(
+        "Place the object on a plain pure white background."
+    )
+    assert transport.submissions == [(job.endpoint, job.request_payload)]
 
 
 def test_provider_never_silently_drops_a_mask() -> None:

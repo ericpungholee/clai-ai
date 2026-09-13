@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.domain.prompts import document_text, text_document
 from app.models.graph import (
@@ -42,6 +42,51 @@ class GraphConflictError(GraphMutationError):
     pass
 
 
+IMAGE_VIEW_ANGLES = frozenset(("right", "back", "left"))
+
+
+def serialize_run_job_record(job: RunJob, version: Version | None) -> RunJobData:
+    status = job.status
+    error = job.error
+    completed_at = job.completed_at
+    if status == "complete" and version is not None:
+        views = {view.angle: view for view in version.image_views}
+        # Versions created by the four-view pipeline always have all three rows.
+        # Older versions can have no rows (or only the former rear-view row), so
+        # preserve their historical completion status.
+        if set(views) == IMAGE_VIEW_ANGLES:
+            view_statuses = {angle: views[angle].status for angle in IMAGE_VIEW_ANGLES}
+            if all(value == "complete" for value in view_statuses.values()):
+                pass
+            elif all(
+                value in {"complete", "failed"} for value in view_statuses.values()
+            ):
+                failed = ", ".join(
+                    angle
+                    for angle in ("right", "back", "left")
+                    if view_statuses[angle] == "failed"
+                )
+                status = "failed"
+                error = f"Could not generate the {failed} image view(s)."
+            else:
+                status = "ingesting"
+                error = None
+                completed_at = None
+    return RunJobData(
+        id=job.id,
+        node_id=job.node_id,
+        status=status,
+        op=str(job.frozen_request["op"]),
+        attempts=job.attempts,
+        error=error,
+        version_id=version.id if version else None,
+        created_at=job.created_at,
+        completed_at=completed_at,
+        provider_elapsed_seconds=job.provider_elapsed_seconds,
+        total_elapsed_seconds=job.total_elapsed_seconds,
+    )
+
+
 def assert_draft_editable(node: GraphNode, db: Session) -> None:
     if db.scalar(select(Version.id).where(Version.node_id == node.id).limit(1)):
         raise GraphConflictError(
@@ -76,6 +121,7 @@ def read_graph_document(project_id: uuid.UUID, db: Session) -> GraphDocument:
             db.scalars(
                 select(Version)
                 .where(Version.node_id.in_(node_ids))
+                .options(selectinload(Version.image_views))
                 .order_by(Version.created_at, Version.id)
             )
         )
@@ -124,26 +170,13 @@ def read_graph_document(project_id: uuid.UUID, db: Session) -> GraphDocument:
         .where(RunJob.project_id == project_id)
         .subquery()
     )
-    jobs = db.execute(
-        select(
-            RunJob.id,
-            RunJob.node_id,
-            RunJob.status,
-            RunJob.attempts,
-            RunJob.error,
-            RunJob.created_at,
-            RunJob.completed_at,
-            RunJob.provider_elapsed_seconds,
-            RunJob.total_elapsed_seconds,
-            RunJob.frozen_request["op"].as_string().label("op"),
-        )
-        .join(ranked, ranked.c.id == RunJob.id)
-        .where(ranked.c.rank == 1)
+    jobs = db.scalars(
+        select(RunJob).join(ranked, ranked.c.id == RunJob.id).where(ranked.c.rank == 1)
     )
-    versions_by_job = {version.run_job_id: version.id for version in versions}
+    versions_by_job = {version.run_job_id: version for version in versions}
     runs = {
-        row.node_id: RunJobData(**row._mapping, version_id=versions_by_job.get(row.id))
-        for row in jobs
+        job.node_id: serialize_run_job_record(job, versions_by_job.get(job.id))
+        for job in jobs
     }
     for node in document.nodes:
         node.run = runs.get(node.id)
@@ -419,6 +452,18 @@ def serialize_version(version: Version) -> VersionData:
         input_snapshot=version.input_snapshot,
         prompt_at_runtime=version.prompt_at_runtime,
         edit_depth=version.edit_depth,
+        views={
+            "front": {"image_url": version.artifact_url, "status": "complete"},
+            **{
+                view.angle: {
+                    "image_url": view.artifact_url
+                    if view.status == "complete"
+                    else None,
+                    "status": view.status,
+                }
+                for view in version.image_views
+            },
+        },
     )
 
 

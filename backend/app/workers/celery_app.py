@@ -6,10 +6,12 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.models.graph import RunJob, VersionMesh
+from app.models.graph import RunJob, VersionImageView, VersionMesh
 from app.providers.factory import FalImageProvider
 from app.providers.fal_transport import FalSdkTransport
-from app.providers.tripo import TripoProvider
+from app.providers.mesh import TRELLIS_HIGH_QUALITY, MeshProvider
+from app.providers.nano_banana import NanoBananaProProvider
+from app.services.image_view_jobs import execute_image_view_job
 from app.services.mesh_jobs import execute_mesh_job
 from app.services.run_execution import execute_run_job
 from app.storage.artifacts import HttpArtifactReader
@@ -62,7 +64,56 @@ def run_job(job_id: str) -> str:
         provider=provider,
         ingestor=ingestor,
     )
+    for angle in ("right", "back", "left"):
+        try:
+            image_view_job.delay(str(version_id), angle)
+        except Exception as error:
+            # The primary is committed. Persist a terminal status for the gallery
+            # and continue dispatching the other angles.
+            with SessionLocal.begin() as db:
+                view = db.get(
+                    VersionImageView, (version_id, angle), with_for_update=True
+                )
+                if view is not None and view.status == "queued":
+                    view.status = "failed"
+                    view.error = f"Angle job could not be queued: {error}"[:8000]
     return str(version_id)
+
+
+@celery_app.task(name="clai.image_view_job")
+def image_view_job(version_id: str, angle: str) -> None:
+    try:
+        if settings.fal_api_key is None:
+            raise ValueError("FAL_KEY is required")
+        artifact_reader = create_artifact_reader(settings)
+        provider = NanoBananaProProvider(
+            transport=FalSdkTransport(
+                settings.fal_api_key, timeout_seconds=settings.fal_timeout_seconds
+            ),
+            artifact_reader=artifact_reader,
+        )
+        ingestor = create_provider_output_ingestor(settings)
+    except Exception as error:
+        with SessionLocal.begin() as db:
+            view = db.scalar(
+                select(VersionImageView)
+                .where(
+                    VersionImageView.version_id == uuid.UUID(version_id),
+                    VersionImageView.angle == angle,
+                )
+                .with_for_update()
+            )
+            if view is not None and view.status == "queued":
+                view.status = "failed"
+                view.error = f"Angle-view worker could not start: {error}"[:8000]
+        return
+    execute_image_view_job(
+        version_id=uuid.UUID(version_id),
+        angle=angle,
+        session_factory=SessionLocal,
+        provider=provider,
+        ingestor=ingestor,
+    )
 
 
 @celery_app.task(name="clai.mesh_job")
@@ -70,8 +121,14 @@ def mesh_job(version_id: str, attempt_id: str) -> None:
     try:
         if settings.fal_api_key is None:
             raise ValueError("FAL_KEY is required")
-        provider = TripoProvider(
-            FalSdkTransport(settings.fal_api_key), create_artifact_reader(settings)
+        provider = MeshProvider(
+            FalSdkTransport(
+                settings.fal_api_key,
+                timeout_seconds=settings.fal_timeout_seconds,
+            ),
+            create_artifact_reader(settings),
+            multi_image_enabled=settings.trellis_enable_multi_image,
+            preset=TRELLIS_HIGH_QUALITY,
         )
         output_reader = HttpArtifactReader(
             allowed_hosts=frozenset(settings.fal_output_host_list),

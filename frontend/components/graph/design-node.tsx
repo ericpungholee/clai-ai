@@ -112,6 +112,11 @@ export const DesignNode = memo(function DesignNode({
           {data.mask && !showMesh && !stale ? (
             <MaskOutline mask={data.mask} />
           ) : null}
+          {data.run.status === "running" ? (
+            <div className="pointer-events-none absolute bottom-9 left-2 rounded bg-white/90 px-2 py-1 shadow-sm">
+              <RunProgress run={data.run} />
+            </div>
+          ) : null}
           {meshPreview ? (
             <div
               role="group"

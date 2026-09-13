@@ -199,6 +199,12 @@ export function GraphWorkspace({
         .flatMap((node) => node.versions)
         .map((version) => [version.id, version]),
     );
+    setViewedVersions((current) =>
+      current.map((version) => allVersions.current.get(version.id) ?? version),
+    );
+    setMeshVersion((current) =>
+      current ? allVersions.current.get(current.id) ?? current : null,
+    );
     const workspace = toWorkspaceGraph(graph);
     workspace.nodes = workspace.nodes
       .filter((node) => !deletingNodes.current.has(node.id))
@@ -964,6 +970,7 @@ export function GraphWorkspace({
           },
         });
         let job = await submitRun(projectId, nodeId, crypto.randomUUID());
+        let visibleVersionId: string | null = null;
         updateNodeData(nodeId, { run: runDisplay(job) });
         while (
           mountedRef.current &&
@@ -973,6 +980,16 @@ export function GraphWorkspace({
           await new Promise((resolve) => window.setTimeout(resolve, 750));
           try {
             job = await getRun(projectId, job.id);
+            if (job.version_id && job.version_id !== visibleVersionId) {
+              visibleVersionId = job.version_id;
+              try {
+                await refreshWorkspace();
+              } catch {
+                setConnectionError(
+                  "The main image is saved, but the angle status is temporarily unavailable. Checking again…",
+                );
+              }
+            }
             updateNodeData(nodeId, { run: runDisplay(job) });
           } catch {
             setConnectionError(

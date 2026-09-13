@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.runs import FrozenRunRequest
-from app.models.graph import GraphNode, RunJob, Version
+from app.models.graph import GraphNode, RunJob, Version, VersionImageView
 from app.models.project import Project
 from app.providers.base import ImageProvider, ProviderJob
 from app.services.frozen_request_codec import decode_frozen_request
@@ -180,6 +180,15 @@ def _commit_version(
         )
         db.add(version)
         db.flush()
+        for angle in ("right", "back", "left"):
+            db.add(
+                VersionImageView(
+                    version_id=version.id,
+                    angle=angle,
+                    status="queued",
+                    source_artifact_url=artifact.artifact_url,
+                )
+            )
         node.active_version_id = version.id
         if project is not None:
             project.thumbnail_url = artifact.artifact_url

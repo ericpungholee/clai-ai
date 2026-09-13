@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { DownloadButton } from "./download-button";
-import type { Version } from "@/lib/graph";
+import type { ImageAngle, Version } from "@/lib/graph";
+
+const angles = ["front", "right", "back", "left"] as const;
+const angleLabels = { front: "Front", right: "Right", back: "Back", left: "Left" };
 
 export function ImageViewer({
   versions: initialVersions,
@@ -51,6 +54,13 @@ export function ImageViewer({
 }
 
 function ImagePane({ version, label }: { version: Version; label: string }) {
+  const [angle, setAngle] = useState<ImageAngle>("front");
+  const imageUrl = angle === "front"
+    ? version.artifact_url
+    : version.views?.[angle]?.image_url;
+  const readyCount = 1 + angles.slice(1).filter(
+    (key) => version.views?.[key]?.status === "complete",
+  ).length;
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number } | null>(null);
   const zoom = (factor: number) =>
@@ -72,7 +82,11 @@ function ImagePane({ version, label }: { version: Version; label: string }) {
           <button aria-label="Zoom in" onClick={() => zoom(1.25)}>
             +
           </button>
-          <DownloadButton url={version.artifact_url} name={`${label}-${version.id}`} label="Download original" />
+          <DownloadButton
+            url={imageUrl ?? version.artifact_url}
+            name={`${label}-${version.id}-${angle}`}
+            label="Download original"
+          />
         </div>
       </div>
       <div
@@ -105,14 +119,57 @@ function ImagePane({ version, label }: { version: Version; label: string }) {
         {/* The source is the original stored artifact, never a resized thumbnail. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={version.artifact_url}
-          alt={label}
+          src={imageUrl ?? version.artifact_url}
+          alt={`${label} — ${angleLabels[angle]} view`}
           draggable={false}
           className="max-h-full max-w-full object-contain"
           style={{
             transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
           }}
         />
+      </div>
+      <div className="shrink-0 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+        <p className="mb-2 text-xs text-neutral-600" aria-live="polite">
+          Angles for 3D · {readyCount}/4 ready
+        </p>
+        <div className="grid grid-cols-4 gap-2" aria-label={`${label} image angles`}>
+          {angles.map((key) => {
+            const artifact = version.views?.[key];
+            const url = key === "front"
+              ? version.artifact_url
+              : artifact?.status === "complete" ? artifact.image_url : null;
+            const status = artifact?.status === "failed"
+              ? "Unavailable"
+              : artifact ? "Generating…" : "Not generated";
+            return (
+              <button
+                key={key}
+                disabled={!url}
+                aria-label={`Show ${angleLabels[key]} view`}
+                aria-pressed={angle === key}
+                onClick={() => {
+                  setAngle(key);
+                  setView({ scale: 1, x: 0, y: 0 });
+                }}
+                className={`overflow-hidden rounded-md border p-1 text-xs disabled:cursor-default ${angle === key ? "border-neutral-900 bg-white" : "border-neutral-200"}`}
+              >
+                {url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={url}
+                    alt=""
+                    className="h-16 w-full rounded object-contain"
+                  />
+                ) : (
+                  <span className="flex h-16 items-center justify-center text-[10px] text-neutral-500">
+                    {status}
+                  </span>
+                )}
+                <span className="block pt-1">{angleLabels[key]}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </section>
   );

@@ -1,7 +1,7 @@
 .PHONY: dev down logs migrate revision backend-shell db-shell test test-postgres test-browser lint build
 
 dev:
-	docker compose up --build
+	docker compose up --build -d
 
 down:
 	docker compose down

@@ -659,3 +659,46 @@ def test_navy_shoe_path_runs_end_to_end_on_postgres_with_fake_provider(
         assert provider.requests[-1].subject.id == str(subject_version_id)
     finally:
         app.dependency_overrides.clear()
+
+
+def test_angle_migration_preserves_saved_rear_and_frozen_mesh_inputs(postgres_engine):
+    migrate(postgres_engine, "c8e4f1a09b3d")
+    with postgres_engine.begin() as connection:
+        project = insert_project(connection)
+        node = insert_node(connection, project)
+        version = insert_version(connection, project, node)
+        connection.execute(
+            text("""
+            INSERT INTO version_rear_images
+                (version_id, status, source_artifact_url, artifact_url)
+            VALUES (:version, 'complete', 'https://cdn.test/shoe.png', 'https://cdn.test/back.png')
+        """),
+            {"version": version},
+        )
+        connection.execute(
+            text("""
+            INSERT INTO version_meshes (version_id, provider, model, status, attempt_id,
+                source_artifact_url, source_rear_artifact_url,
+                provider_response_metadata)
+            VALUES (:version, 'fal', 'fal-ai/trellis-2', 'queued', :attempt,
+                'https://cdn.test/shoe.png', 'https://cdn.test/back.png', '{}'::jsonb)
+        """),
+            {"version": version, "attempt": uuid.uuid4()},
+        )
+    migrate(postgres_engine)
+    with postgres_engine.begin() as connection:
+        assert connection.execute(
+            text("SELECT angle, artifact_url FROM version_image_views")
+        ).one() == ("back", "https://cdn.test/back.png")
+        assert connection.scalar(
+            text("SELECT source_image_urls FROM version_meshes")
+        ) == ["https://cdn.test/shoe.png", "https://cdn.test/back.png"]
+        for angle in ("right", "left"):
+            connection.execute(
+                text("""
+                INSERT INTO version_image_views (version_id, angle, source_artifact_url)
+                VALUES (:version, :angle, 'https://cdn.test/shoe.png')
+            """),
+                {"version": version, "angle": angle},
+            )
+        assert connection.scalar(text("SELECT count(*) FROM version_image_views")) == 3

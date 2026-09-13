@@ -7,6 +7,7 @@ from app.providers.base import (
     ProviderResult,
 )
 from app.providers.fal_transport import FalTransport
+from app.services.prompt_builder import build_angle_view_prompt
 
 
 class NanoBananaProProvider:
@@ -38,6 +39,7 @@ class NanoBananaProProvider:
             "9:16",
         }
     )
+    _resolutions = frozenset({"1K", "2K", "4K"})
 
     def __init__(
         self,
@@ -136,16 +138,12 @@ class NanoBananaProProvider:
                 "Requested resolution exceeds provider capability"
             )
 
-        payload: dict[str, object] = {
-            "prompt": request.prompt_at_runtime,
-            "num_images": 1,
-            "seed": request.seed,
-            "aspect_ratio": request.settings.aspect_ratio,
-            "output_format": "png",
-            "resolution": _resolution_label(width=width, height=height),
-            "limit_generations": True,
-            "enable_web_search": False,
-        }
+        payload = self._image_payload(
+            prompt=request.prompt_at_runtime,
+            seed=request.seed,
+            aspect_ratio=request.settings.aspect_ratio,
+            resolution=_resolution_label(width=width, height=height),
+        )
 
         input_versions = _input_versions(request)
         if len(input_versions) > 3:
@@ -159,12 +157,87 @@ class NanoBananaProProvider:
 
         if input_versions:
             payload["image_urls"] = [
-                self._upload(version) for version in input_versions
+                self._upload_url(version.artifact_url) for version in input_versions
             ]
         return payload
 
-    def _upload(self, version: VersionSnapshot) -> str:
-        artifact = self._artifact_reader.read(version.artifact_url)
+    def execute_angle_view(
+        self,
+        *,
+        source_url: str,
+        aspect_ratio: str,
+        resolution: str,
+        seed: int,
+        white_background: bool,
+        angle: str,
+        design_prompt: str,
+    ) -> ProviderJob:
+        return self.submit(
+            self.prepare_angle_view(
+                source_url=source_url,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
+                seed=seed,
+                white_background=white_background,
+                angle=angle,
+                design_prompt=design_prompt,
+            )
+        )
+
+    def prepare_angle_view(
+        self,
+        *,
+        source_url: str,
+        aspect_ratio: str,
+        resolution: str,
+        seed: int,
+        white_background: bool,
+        angle: str,
+        design_prompt: str,
+    ) -> PreparedProviderRequest:
+        if aspect_ratio not in self._aspect_ratios:
+            raise ProviderContractError("Unsupported Nano Banana Pro aspect ratio")
+        if resolution not in self._resolutions:
+            raise ProviderContractError("Unsupported Nano Banana Pro resolution")
+        payload = self._image_payload(
+            prompt=build_angle_view_prompt(
+                angle=angle,
+                design_prompt=design_prompt,
+                white_background=white_background,
+            ),
+            seed=seed,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+        )
+        payload["image_urls"] = [self._upload_url(source_url)]
+        return PreparedProviderRequest(
+            provider=self.id,
+            model=self.model,
+            endpoint=self.edit_endpoint,
+            request_payload=payload,
+        )
+
+    def _image_payload(
+        self,
+        *,
+        prompt: str,
+        seed: int,
+        aspect_ratio: str,
+        resolution: str,
+    ) -> dict[str, object]:
+        return {
+            "prompt": prompt,
+            "num_images": 1,
+            "seed": seed,
+            "aspect_ratio": aspect_ratio,
+            "output_format": "png",
+            "resolution": resolution,
+            "limit_generations": True,
+            "enable_web_search": False,
+        }
+
+    def _upload_url(self, artifact_url: str) -> str:
+        artifact = self._artifact_reader.read(artifact_url)
         return self._transport.upload(
             content=artifact.content,
             filename=artifact.filename,

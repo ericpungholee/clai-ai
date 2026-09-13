@@ -20,6 +20,7 @@ from app.services.operation_routing import OperationRoutingError, resolve_op
 from app.services.prompt_builder import (
     PRESERVATION_PREAMBLE,
     WHITE_BACKGROUND_CLAUSE,
+    build_angle_view_prompt,
     build_prompt,
 )
 from app.services.run_freezing import freeze_run_request
@@ -283,9 +284,11 @@ def test_edit_prompt_uses_the_accepted_preamble_exactly() -> None:
 
 @pytest.mark.parametrize("op", [Op.GENERATE, Op.GENERATE_REF])
 def test_generate_prompt_appends_white_background_clause(op: Op) -> None:
-    assert build_prompt(user_prompt="  a navy shoe  ", op=op) == (
-        "a navy shoe\n\nPlace the object on a plain pure white background."
-    )
+    prompt = build_prompt(user_prompt="  a navy shoe  ", op=op)
+    assert prompt.startswith("a navy shoe\n\n")
+    assert "exactly one instance of the object in a single view" in prompt
+    assert "no contact sheet" in prompt
+    assert prompt.endswith(WHITE_BACKGROUND_CLAUSE)
     assert (
         WHITE_BACKGROUND_CLAUSE == "Place the object on a plain pure white background."
     )
@@ -293,10 +296,51 @@ def test_generate_prompt_appends_white_background_clause(op: Op) -> None:
 
 @pytest.mark.parametrize("op", [Op.GENERATE, Op.GENERATE_REF])
 def test_generate_prompt_omits_white_background_clause_when_disabled(op: Op) -> None:
-    assert (
-        build_prompt(user_prompt="  a navy shoe  ", op=op, white_background=False)
-        == "a navy shoe"
+    prompt = build_prompt(user_prompt="  a navy shoe  ", op=op, white_background=False)
+    assert prompt.startswith("a navy shoe\n\n")
+    assert "exactly one instance of the object in a single view" in prompt
+    assert WHITE_BACKGROUND_CLAUSE not in prompt
+
+
+@pytest.mark.parametrize(
+    "angle,viewpoint",
+    [
+        ("right", "right-side three-quarter view"),
+        ("back", "opposite/rear side"),
+        ("left", "left-side three-quarter view"),
+    ],
+)
+@pytest.mark.parametrize("white_background", [True, False])
+def test_angle_prompt_preserves_identity_and_rotates_only_camera(
+    angle, viewpoint, white_background
+):
+    prompt = build_angle_view_prompt(
+        angle=angle,
+        design_prompt="A dark blue deck with no exposed wood",
+        white_background=white_background,
     )
+    for requirement in (
+        viewpoint,
+        "exactly one object",
+        "exact same object/design",
+        "Rotate the viewpoint only",
+        "same object orientation",
+        "scale, proportions",
+        "materials, colors",
+        "graphics, logos",
+        "never move, mirror, redraw, duplicate, or omit",
+        "Do not invent exposed layers, wood, grip tape",
+        "A dark blue deck with no exposed wood",
+        "centered",
+        "plain simple background",
+        "No side-by-side comparison",
+        "no contact sheet",
+        "no multiple views",
+        "no duplicate objects",
+    ):
+        assert requirement in prompt
+    assert "same camera angle" not in prompt
+    assert prompt.endswith(WHITE_BACKGROUND_CLAUSE) == white_background
 
 
 @pytest.mark.parametrize(
