@@ -1,6 +1,7 @@
 # Clai
 
-[![Watch the Clai demo](docs/screenshots/demo-thumbnail.jpg)]([https://www.youtube.com/watch?v=RAJJLHVkAt4](https://www.youtube.com/watch?v=-yTFJw_ekxk))
+[![Watch the original VRIL demo](docs/screenshots/vril-demo-thumbnail.jpg)](https://www.youtube.com/watch?v=-yTFJw_ekxk)
+
 [![Watch the Clai demo](docs/screenshots/demo-thumbnail.jpg)](https://www.youtube.com/watch?v=RAJJLHVkAt4)
 
 ![Projects gallery](docs/screenshots/projects.jpg)
