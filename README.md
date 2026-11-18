@@ -10,7 +10,7 @@
 
 ![3D view of a generated product](docs/screenshots/3d-view.png)
 
-> **Award-winning foundation:** Clai builds on work that won 1st place and the Best Use of Google Gemini award among 82 teams at Hack Western. [View the original project on Devpost](https://devpost.com/software/vril).
+> **Award-winning foundation:** Clai is updated version of my hackathon project that won 1st place and the Best Use of Google Gemini award among 82 teams at Hack Western. [View the original project on Devpost](https://devpost.com/software/vril).
 
 [![CI](https://github.com/ericpungholee/clai-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/ericpungholee/clai-ai/actions/workflows/ci.yml)
 
