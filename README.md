@@ -1,9 +1,9 @@
 # Clai
 
-##Hackthon Version
+## Hackathon Version
 [![Watch the original VRIL demo](docs/screenshots/vril-demo-thumbnail.jpg)](https://www.youtube.com/watch?v=-yTFJw_ekxk)
 
-##Canavas Version
+## Canavas Version
 [![Watch the Clai demo](docs/screenshots/demo-thumbnail.jpg)](https://www.youtube.com/watch?v=RAJJLHVkAt4)
 
 ![Projects gallery](docs/screenshots/projects.jpg)
